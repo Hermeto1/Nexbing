@@ -108,7 +108,7 @@ namespace Ryujinx.Ava.UI.Views.User
             _parent.DeleteUser(_profile);
         }
 
-        private void SaveButton_Click(object sender, RoutedEventArgs e)
+        private async void SaveButton_Click(object sender, RoutedEventArgs e)
         {
             DataValidationErrors.ClearErrors(NameBox);
 
@@ -128,23 +128,38 @@ namespace Ryujinx.Ava.UI.Views.User
 
             if (_profile != null && !_isNewUser)
             {
+                // [Nextendo] The account is the SOURCE OF TRUTH for a linked profile's name + picture.
+                // Editing it must reach the server, else the local change would silently diverge from
+                // the site (and the in-game identity) with no way to reconcile. So for a linked profile
+                // we PUSH FIRST (the name push doubles as the online probe) and only apply locally if
+                // it succeeds — offline / server down => the edit is rejected.  (#2 sync-up + #3 offline gate.)
+                if (_profile.IsNextendoLinked)
+                {
+                    (bool ok, string err) = await NextendoApi.SetUsernameAsync(ViewModel.Name);
+                    if (!ok)
+                    {
+                        bool fr = LocaleManager.Instance.CurrentLanguageCode?.StartsWith("fr", System.StringComparison.OrdinalIgnoreCase) ?? false;
+                        string msg = !string.IsNullOrEmpty(err)
+                            ? err
+                            : (fr
+                                ? "Tu dois être en ligne pour modifier ton profil Nextendo : le changement doit être synchronisé avec ton compte."
+                                : "You must be online to change your Nextendo profile: the change has to sync with your account.");
+                        await ContentDialogHelper.CreateErrorDialog(msg);
+                        return; // rejected — nothing applied locally, so no divergence with the account
+                    }
+
+                    // Online (the name push went through): push the new picture too (best-effort).
+                    if (ViewModel.Image is { Length: > 0 })
+                    {
+                        _ = NextendoApi.SetProfileImageAsync(ViewModel.Image);
+                    }
+                }
+
                 _profile.Name = ViewModel.Name;
                 _profile.Image = ViewModel.Image;
                 _profile.UpdateState();
                 _parent.AccountManager.SetUserName(_profile.UserId, _profile.Name);
                 _parent.AccountManager.SetUserImage(_profile.UserId, _profile.Image);
-
-                // [Nextendo] Sync bidirectionnelle : si ce profil est lié au compte Nextendo, on
-                // remonte le nouveau nom ET la photo au compte (donc au site + aux amis).
-                // (IsNextendoLinked compare en ignore-case — mon ancien test == échouait sur la casse.)
-                if (_profile.IsNextendoLinked)
-                {
-                    _ = NextendoApi.SetUsernameAsync(_profile.Name);
-                    if (_profile.Image is { Length: > 0 })
-                    {
-                        _ = NextendoApi.SetProfileImageAsync(_profile.Image);
-                    }
-                }
             }
             else if (_isNewUser)
             {

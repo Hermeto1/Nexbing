@@ -58,6 +58,15 @@ namespace Ryujinx.Ava.Common
         /// successful poll confirms online is enabled and the client is up to date.</summary>
         public static BlockReason Evaluate()
         {
+            // [Nextendo] DEV / unstamped local builds (`dotnet build` — the CI placeholders were
+            // never filled, version reads like "1.0.0-dirty+<hash>") bypass EVERY gate: no
+            // forced-update popup, no kill-switch, no version block. Local testing stays
+            // unrestricted while stamped release/canary builds keep all their safeguards.
+            if (!ReleaseInformation.IsValid)
+            {
+                return BlockReason.None;
+            }
+
             lock (_lock)
             {
                 if (!_polled || !_reachable)

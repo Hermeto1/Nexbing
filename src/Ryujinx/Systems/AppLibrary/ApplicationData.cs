@@ -388,7 +388,10 @@ namespace Ryujinx.Ava.Systems.AppLibrary
         // crash; the test is over, so it is enforced again.
         [JsonIgnore]
         public bool IsNextendoVersionOk =>
-            IsNextendoCompatible && (Version == NextendoCompatibleVersion || IsCtgpdxVariant);
+            // [Nextendo] DEV / unstamped local builds skip the exact-version gate so ANY version
+            // of a compatible title can be tested online; stamped releases keep the strict check.
+            IsNextendoCompatible && (Version == NextendoCompatibleVersion || IsCtgpdxVariant
+                || !Ryujinx.Common.ReleaseInformation.IsValid);
 
         // Only Splatoon 2 needs the BCAT schedule byaml (VS/Coop/Fest schedule). The "download the
         // online schedule" prompt + context-menu button must appear ONLY for these titles — never

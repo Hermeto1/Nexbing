@@ -267,6 +267,50 @@ namespace Ryujinx.Ava.UI.Views.Main
             }
         }
 
+        // [Nextendo] Startup heal for accounts linked WITHOUT a bound local profile. Earlier
+        // OAuth logins saved the account but never bound/renamed a Ryujinx profile, so the
+        // Switch profile kept its LOCAL name/picture — and the in-game name (read from that
+        // profile by ProfileServer) stopped matching the Nextendo identity, which let an
+        // in-game pseudo diverge from the account. Called once at startup: if a link exists
+        // but no local profile carries the account pseudo, apply the identity to the ACTIVE
+        // profile (rename + avatar + Mii + "N" badge), preserving its save data. No-op when
+        // nothing is linked or a matching profile is already bound.
+        internal static async Task HealNextendoProfileAsync()
+        {
+            if (!NextendoAccount.IsLinked)
+            {
+                return;
+            }
+
+            Ryujinx.HLE.HOS.Services.Account.Acc.AccountManager am = RyujinxApp.MainWindow?.AccountManager;
+            if (am == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Ryujinx.HLE.HOS.Services.Account.Acc.UserProfile bound = FindBoundProfile(am);
+                if (bound != null && string.Equals(bound.Name, NextendoAccount.Username, StringComparison.Ordinal))
+                {
+                    return; // already bound to a profile that carries the account pseudo
+                }
+
+                await ApplyNextendoIdentity(
+                    am,
+                    RyujinxApp.MainWindow?.ViewModel?.LibHacHorizonManager?.RyujinxClient,
+                    NextendoAccount.Username,
+                    NextendoAccount.NexToken,
+                    reuseActiveProfile: true);
+            }
+            catch (Exception ex)
+            {
+                Ryujinx.Common.Logging.Logger.Warning?.Print(
+                    Ryujinx.Common.Logging.LogClass.Application,
+                    $"[Nextendo] startup profile heal failed: {ex.Message}");
+            }
+        }
+
         // ApplyNextendoIdentity ensures a dedicated Ryujinx user-profile exists for the
         // Nextendo account: created on first login (account pseudo + a random avatar, or
         // the profile saved on the account), reused afterwards, and set as the default /
@@ -485,6 +529,29 @@ namespace Ryujinx.Ava.UI.Views.Main
             (bool ok, string error) = await signIn;
             if (ok)
             {
+                // [Nextendo] Bind the account to a local Ryujinx profile: rename/create the
+                // profile with the account pseudo + avatar + Mii and mark it Nextendo-linked
+                // (the "N" badge). The OAuth login only saved the account; without this the
+                // Switch profile kept its LOCAL name/picture, so the in-game name (read from
+                // the profile by ProfileServer) no longer matched the Nextendo identity —
+                // which is exactly what let an in-game pseudo diverge from the account.
+                // Mirrors the guest path + the old password dialog (reuseActiveProfile: false
+                // => a dedicated profile for the account).
+                try
+                {
+                    await ApplyNextendoIdentity(
+                        Window?.AccountManager,
+                        ViewModel?.LibHacHorizonManager?.RyujinxClient,
+                        NextendoAccount.Username,
+                        NextendoAccount.NexToken);
+                }
+                catch (Exception ex)
+                {
+                    Ryujinx.Common.Logging.Logger.Warning?.Print(
+                        Ryujinx.Common.Logging.LogClass.Application,
+                        $"[Nextendo] account profile bind failed: {ex.Message}");
+                }
+
                 await ShowNextendoAccountPanel();
             }
             else if (!string.IsNullOrEmpty(error))

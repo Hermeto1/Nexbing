@@ -166,6 +166,13 @@ namespace Ryujinx.Ava.UI.Windows
                     }
                 });
 
+                // [Nextendo] Heal a link that predates the profile binding (or a login path
+                // that skipped it): bind the linked account to the active local profile so the
+                // pseudo / avatar / Mii + "N" badge follow the account and the in-game name
+                // matches the identity. Runs on the UI thread; no-op when nothing needs healing.
+                await Dispatcher.UIThread.InvokeAsync(
+                    Ryujinx.Ava.UI.Views.Main.MainMenuBarView.HealNextendoProfileAsync);
+
                 await ShowIntelMacWarningAsync();
                 if (CommandLineState.FirmwareToInstallPathArg.TryGet(out FilePath fwPath))
                 {

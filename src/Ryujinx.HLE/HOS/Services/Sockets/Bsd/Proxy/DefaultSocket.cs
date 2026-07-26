@@ -179,7 +179,31 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Proxy
         {
             EnsureNetworkInterfaceBound();
 
-            return BaseSocket.ReceiveFrom(buffer, flags, ref remoteEP);
+            // [Nextendo] Same spurious ICMP-induced reset that DisableUdpConnReset neutralises for
+            // WSAECONNRESET (10054), but for WSAENETRESET (10052) — which SIO_UDP_CONNRESET does NOT
+            // suppress. A prior sendto to a P2P peer drew back an ICMP error (TTL / transient
+            // unreachable), so the NEXT recvfrom on the SHARED P2P socket fails with NetworkReset;
+            // S2/MK8 read that as the network dropping and close the online session -> 2618-0006
+            // (confirmed 6/6 in a prod capture: 6 network errors == 6 SocketException(10052)). One
+            // flaky peer must not kill the socket every peer shares. Swallow it and read the next
+            // datagram: the failed call already consumed the queued ICMP error.
+            for (int attempt = 0; attempt < 16; attempt++)
+            {
+                try
+                {
+                    return BaseSocket.ReceiveFrom(buffer, flags, ref remoteEP);
+                }
+                catch (SocketException ex) when (
+                    ex.SocketErrorCode == SocketError.NetworkReset ||
+                    ex.SocketErrorCode == SocketError.ConnectionReset)
+                {
+                    // transient per-peer ICMP error: drop it and retry the read instead of failing
+                }
+            }
+
+            // A sustained storm of ICMP errors is unheard of; report "no data yet" (EWOULDBLOCK) so
+            // the game simply polls again, never a fatal drop.
+            throw new SocketException((int)SocketError.WouldBlock);
         }
 
         public int Send(ReadOnlySpan<byte> buffer)

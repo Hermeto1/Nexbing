@@ -55,6 +55,7 @@ namespace Ryujinx.Ava.UI.Views.Settings
             ChangePseudoButton.Click += async (_, _) => await ChangePseudo();
             ChangePpButton.Click += async (_, _) => await ChangePp();
             AddFriendButton.Click += async (_, _) => await AddFriend();
+            AcceptAllButton.Click += async (_, _) => await AcceptAll();
 
             // [Nextendo] Credits, localised through the normal locale system. These used to be a
             // hand-rolled EN/FR toggle, so every other language fell back to English.
@@ -503,6 +504,26 @@ namespace Ryujinx.Ava.UI.Views.Settings
             {
                 await NextendoApi.AcceptFriendAsync(pid);
                 await LoadSocial();
+            }
+        }
+
+        // [Nextendo] Accepts every pending incoming friend request at once.
+        private async Task AcceptAll()
+        {
+            AcceptAllButton.IsEnabled = false;
+            try
+            {
+                int n = await NextendoApi.AcceptAllRequestsAsync();
+                await LoadSocial();
+                ShowStatus(
+                    n > 0
+                        ? LocaleManager.GetFormatted(LocaleKeys.Dialog_Nextendo_AcceptAllRequestsResultFormat, n)
+                        : LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_AcceptAllRequestsNone],
+                    true);
+            }
+            finally
+            {
+                AcceptAllButton.IsEnabled = true;
             }
         }
 

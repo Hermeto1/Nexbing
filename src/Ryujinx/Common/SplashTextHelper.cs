@@ -17,6 +17,14 @@ namespace Ryujinx.Common
             Logger.Notice.Print(LogClass.Application, @" / , _/ / // // // / / _ \ / /  / _ \ / _ `/");
             Logger.Notice.Print(LogClass.Application, @"/_/|_|  \_, / \_,_/ /_.__//_/  /_//_/ \_, / ");
             Logger.Notice.Print(LogClass.Application,  "       /___/                         /___/  ");
+
+            // [Nextendo] Big Nextendo logo, right under the Ryujinx one (same Slant figlet style).
+            Logger.Notice.Print(LogClass.Application, "");
+            Logger.Notice.Print(LogClass.Application, @"    _   __          __                 __    ");
+            Logger.Notice.Print(LogClass.Application, @"   / | / /__  _  __/ /____  ____  ____/ /___ ");
+            Logger.Notice.Print(LogClass.Application, @"  /  |/ / _ \| |/_/ __/ _ \/ __ \/ __  / __ \");
+            Logger.Notice.Print(LogClass.Application, @" / /|  /  __/>  </ /_/  __/ / / / /_/ / /_/ /");
+            Logger.Notice.Print(LogClass.Application, @"/_/ |_/\___/_/|_|\__/\___/_/ /_/\__,_/\____/ ");
             
             if (splash is null)
             {

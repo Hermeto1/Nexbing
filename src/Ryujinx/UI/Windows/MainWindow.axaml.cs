@@ -381,9 +381,14 @@ namespace Ryujinx.Ava.UI.Windows
 
         private async Task CheckLaunchState()
         {
-            // [Nextendo beta] First-launch quick-start: games folder, prod.keys, online (guest)
-            // profile + how-the-beta-works. Shown once, modally, before anything else.
-            if (NextendoFirstRunWindow.IsFirstRun())
+            // [Nextendo] First-launch quick-start (fresh install) and the "what's new" popup (first
+            // launch after an update) both need the main window loaded before a modal can open, so
+            // handle them together. A fresh install shows the wizard only; an existing install that
+            // just updated shows the condensed patch notes once.
+            bool firstRun = NextendoFirstRunWindow.IsFirstRun();
+            bool showPatchNotes = !firstRun && Ryujinx.Ava.Common.NextendoPatchNotes.ShouldShow();
+
+            if (firstRun || showPatchNotes)
             {
                 await Dispatcher.UIThread.InvokeAsync(async () =>
                 {
@@ -391,7 +396,7 @@ namespace Ryujinx.Ava.UI.Windows
                     {
                         // ShowDialog needs this owner window fully loaded; CheckLaunchState can run
                         // before that, so wait for Loaded first (otherwise the modal throws and the
-                        // wizard silently never appears).
+                        // dialog silently never appears).
                         if (!IsLoaded)
                         {
                             System.Threading.Tasks.TaskCompletionSource ready = new();
@@ -411,11 +416,22 @@ namespace Ryujinx.Ava.UI.Windows
                             await ready.Task;
                         }
 
-                        await new NextendoFirstRunWindow().ShowDialog(this);
+                        if (firstRun)
+                        {
+                            await new NextendoFirstRunWindow().ShowDialog(this);
+
+                            // Fresh install: seed the patch-note flag so the wizard isn't immediately
+                            // followed by a "what's new" for a version this install never had before.
+                            Ryujinx.Ava.Common.NextendoPatchNotes.MarkShown();
+                        }
+                        else
+                        {
+                            await Ryujinx.Ava.Common.NextendoPatchNotes.ShowAsync();
+                        }
                     }
                     catch (Exception ex)
                     {
-                        Logger.Warning?.Print(LogClass.UI, $"[Nextendo] first-run wizard failed: {ex.Message}");
+                        Logger.Warning?.Print(LogClass.UI, $"[Nextendo] first-run / patch-note popup failed: {ex.Message}");
                     }
                 });
             }

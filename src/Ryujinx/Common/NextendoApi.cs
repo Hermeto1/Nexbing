@@ -570,6 +570,27 @@ namespace Ryujinx.Ava.Common
             catch { return false; }
         }
 
+        /// <summary>
+        /// [Nextendo] Accepts EVERY pending incoming friend request in one shot. Fetches the current
+        /// request list from the server first — so it acts on the true pending set, not a possibly
+        /// stale UI copy — then accepts each one. Returns how many were actually accepted.
+        /// </summary>
+        public static async Task<int> AcceptAllRequestsAsync()
+        {
+            (_, List<Friend> requests) = await GetSocialAsync();
+
+            int accepted = 0;
+            foreach (Friend r in requests)
+            {
+                if (r.Pid != 0 && await AcceptFriendAsync(r.Pid))
+                {
+                    accepted++;
+                }
+            }
+
+            return accepted;
+        }
+
         public static async Task DeclineFriendAsync(ulong pid)
         {
             try

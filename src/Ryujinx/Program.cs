@@ -455,8 +455,13 @@ namespace Ryujinx.Ava
         internal static void PrintSystemInfo()
         {
             // Print the ryubing logo + joke splash
-            SplashTextHelper.PrintSplash(); 
-            
+            SplashTextHelper.PrintSplash();
+
+            // [Nextendo] Guaranteed Nextendo banner in the console. The tagline used to appear only
+            // as one of many random splashes above, so most launches showed no Nextendo line at all;
+            // print it every time so the console always states what this build is.
+            Logger.Notice.Print(LogClass.Application, "Nextendo Network: play MK8 Deluxe, Splatoon 2 and Smash Ultimate online.");
+
             Logger.Notice.Print(LogClass.Application, $"{RyujinxApp.FullAppName} Version: {Version}");
             Logger.Notice.Print(LogClass.Application, $".NET Runtime: {RuntimeInformation.FrameworkDescription}");
             SystemInfo.Gather().Print();

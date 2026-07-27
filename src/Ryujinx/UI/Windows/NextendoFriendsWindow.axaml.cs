@@ -38,6 +38,10 @@ namespace Ryujinx.Ava.UI.Windows
         private CancellationTokenSource _checkCancel;
         private bool _checking;
 
+        // External address is masked (Discord-style spoiler) until the player clicks to reveal it.
+        private string _externalEndpoint = "";
+        private bool _externalRevealed;
+
         /// <summary>Only one friends window at a time; a second Ctrl+F just raises the first.</summary>
         private static NextendoFriendsWindow _current;
 
@@ -67,6 +71,15 @@ namespace Ryujinx.Ava.UI.Windows
             CopyCodeButton.Click += CopyCode_Click;
             AddFriendButton.Click += async (_, _) => await AddFriend();
             CheckButton.Click += async (_, _) => await RunCheck();
+            AcceptAllButton.Click += async (_, _) => await AcceptAll();
+
+            // Click the spoiler block to reveal the external address (stays revealed until the
+            // next connection check re-masks it).
+            ExternalReveal.PointerPressed += (_, _) =>
+            {
+                _externalRevealed = true;
+                ApplyExternalMask();
+            };
 
             // Presence goes stale fast — a friend list that lies about who is online is worse than
             // no list at all. 20s matches what the account server itself considers fresh.
@@ -295,15 +308,63 @@ namespace Ryujinx.Ava.UI.Windows
                 NatHint.Text = LocaleManager.Instance[hint];
                 NatHint.IsVisible = true;
 
-                ExternalValue.Text = string.IsNullOrEmpty(result.ExternalEndpoint)
-                    ? ""
-                    : $"{LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ExternalAddressLabel]}: {result.ExternalEndpoint}";
+                _externalEndpoint = result.ExternalEndpoint ?? "";
+                _externalRevealed = false; // re-mask on every fresh check
+                ApplyExternalMask();
             }
             finally
             {
                 _checking = false;
                 CheckButton.IsEnabled = true;
                 CheckButton.Content = LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_NetworkCheckButton];
+            }
+        }
+
+        // [Nextendo] Accepts every pending incoming friend request at once.
+        private async Task AcceptAll()
+        {
+            AcceptAllButton.IsEnabled = false;
+            try
+            {
+                int n = await NextendoApi.AcceptAllRequestsAsync();
+                await LoadSocial();
+                ShowStatus(
+                    n > 0
+                        ? LocaleManager.Instance.UpdateAndGetDynamicValue(LocaleKeys.Dialog_Nextendo_AcceptAllRequestsResultFormat, n.ToString())
+                        : LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_AcceptAllRequestsNone],
+                    true);
+            }
+            finally
+            {
+                AcceptAllButton.IsEnabled = true;
+            }
+        }
+
+        // [Nextendo] Renders the external address as a Discord-style spoiler: a grey block hides it
+        // until the player clicks. Hidden entirely when the check didn't yield an endpoint.
+        private void ApplyExternalMask()
+        {
+            if (string.IsNullOrEmpty(_externalEndpoint))
+            {
+                ExternalRow.IsVisible = false;
+
+                return;
+            }
+
+            ExternalRow.IsVisible = true;
+            ExternalLabel.Text = LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ExternalAddressLabel] + ":";
+            ExternalValue.Text = _externalEndpoint;
+
+            if (_externalRevealed)
+            {
+                ExternalReveal.Background = Brushes.Transparent;
+                ExternalValue.Opacity = 0.85;
+            }
+            else
+            {
+                // Grey block over the address until the player clicks it.
+                ExternalReveal.Background = Brush.Parse("#99808080");
+                ExternalValue.Opacity = 0;
             }
         }
 

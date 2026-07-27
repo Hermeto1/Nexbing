@@ -56,8 +56,16 @@
                         <Ellipse Name="NatDot" Width="8" Height="8" VerticalAlignment="Center" />
                         <TextBlock Name="NatValue" FontWeight="SemiBold" VerticalAlignment="Center" Text="—" />
                     </StackPanel>
-                    <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,6,0,0"
-                               Name="ExternalValue" FontSize="11" Opacity="0.5" />
+                    <!-- External address: hidden by default (Discord-style spoiler), click to reveal. -->
+                    <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal"
+                                Margin="0,6,0,0" Spacing="6" Name="ExternalRow" IsVisible="False">
+                        <TextBlock Name="ExternalLabel" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                        <Border Name="ExternalReveal" CornerRadius="3" Padding="6,1" Cursor="Hand"
+                                VerticalAlignment="Center"
+                                ToolTip.Tip="{ext:Locale Dialog_Nextendo_ExternalAddressRevealHint}">
+                            <TextBlock Name="ExternalValue" FontSize="11" VerticalAlignment="Center" />
+                        </Border>
+                    </StackPanel>
                 </Grid>
                 <TextBlock Name="NatHint" TextWrapping="Wrap" FontSize="11" Opacity="0.75" IsVisible="False" />
             </StackPanel>
@@ -68,7 +76,12 @@
 
                 <!-- Incoming requests, only when there are any. -->
                 <StackPanel Name="RequestsPanel" Spacing="6" IsVisible="False">
-                    <TextBlock Classes="h1" Text="{ext:Locale Dialog_Nextendo_FriendRequestsReceivedTitle}" />
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Classes="h1" VerticalAlignment="Center"
+                                   Text="{ext:Locale Dialog_Nextendo_FriendRequestsReceivedTitle}" />
+                        <Button Grid.Column="1" Name="AcceptAllButton" VerticalAlignment="Center"
+                                Content="{ext:Locale Dialog_Nextendo_AcceptAllRequestsButton}" />
+                    </Grid>
                     <ItemsControl Name="RequestsList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="models:NextendoFriendModel">

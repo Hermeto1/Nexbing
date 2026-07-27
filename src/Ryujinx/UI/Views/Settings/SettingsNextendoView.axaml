@@ -62,7 +62,10 @@
 
                     <!-- Incoming friend requests -->
                     <StackPanel Name="RequestsPanel" Spacing="6" IsVisible="False">
-                        <TextBlock Classes="h1" Text="{ext:Locale Dialog_Nextendo_FriendRequestsReceivedTitle}" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Classes="h1" VerticalAlignment="Center" Text="{ext:Locale Dialog_Nextendo_FriendRequestsReceivedTitle}" />
+                            <Button Grid.Column="1" Name="AcceptAllButton" VerticalAlignment="Center" Content="{ext:Locale Dialog_Nextendo_AcceptAllRequestsButton}" />
+                        </Grid>
                         <Border Background="#1A808080" CornerRadius="8" Padding="6">
                             <ItemsControl Name="RequestsList">
                                 <ItemsControl.ItemTemplate>

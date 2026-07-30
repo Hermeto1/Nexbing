@@ -88,7 +88,10 @@
                     </StackPanel>
 
                     <!-- Friends -->
-                    <TextBlock Classes="h1" Text="{ext:Locale Dialog_Nextendo_MyFriendsTitle}" />
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Classes="h1" VerticalAlignment="Center" Text="{ext:Locale Dialog_Nextendo_MyFriendsTitle}" />
+                        <TextBlock Grid.Column="1" Name="FriendsCountText" VerticalAlignment="Center" FontSize="11" Foreground="#33E86B" />
+                    </Grid>
                     <Grid ColumnDefinitions="*,Auto">
                         <TextBox Name="FriendCodeBox" Grid.Column="0" Watermark="{ext:Locale Dialog_Nextendo_FriendCodeBoxWatermark}" />
                         <Button Name="AddFriendButton" Grid.Column="1" Margin="8,0,0,0" Content="{ext:Locale Dialog_Nextendo_AddFriendButton}" />
@@ -116,6 +119,11 @@
                             </ItemsControl>
                         </StackPanel>
                     </Border>
+
+                    <!-- Notifications: Switch-style in-game toasts (friend online / friend request). -->
+                    <ToggleSwitch Name="NotificationsToggle"
+                                  Content="{ext:Locale Dialog_Nextendo_NotificationsToggle}"
+                                  IsCheckedChanged="NotificationsToggle_Changed" />
 
                     <!-- Game history -->
                     <TextBlock Classes="h1" Text="{ext:Locale Dialog_Nextendo_GameHistoryTitle}" />

@@ -237,8 +237,10 @@ namespace Ryujinx.Ava.UI.Windows
 
             NoFriendsText.IsVisible = _friends.Count == 0;
             RequestsPanel.IsVisible = _requests.Count > 0;
-            OnlineCountText.Text = online > 0
-                ? LocaleManager.Instance.UpdateAndGetDynamicValue(LocaleKeys.Dialog_Nextendo_FriendsOnlineCountFormat, online)
+
+            // "X / Y online" — how many friends you can reach right now, out of the total.
+            OnlineCountText.Text = _friends.Count > 0
+                ? LocaleManager.Instance.UpdateAndGetDynamicValue(LocaleKeys.Dialog_Nextendo_FriendsOnlineTotalFormat, online, _friends.Count)
                 : "";
         }
 

@@ -15,6 +15,15 @@ namespace Ryujinx.Ava.UI.Helpers
         internal const uint WS_POPUP = 0x80000000;
         internal const uint WS_VISIBLE = 0x10000000;
 
+        // [Nextendo] Extended styles for a click-through overlay window (in-game toast notifications):
+        // WS_EX_TRANSPARENT makes the window pass mouse input to whatever is beneath it, WS_EX_LAYERED
+        // is required alongside it for the transparency to take effect.
+        internal const uint WS_EX_TRANSPARENT = 0x00000020;
+        internal const uint WS_EX_LAYERED = 0x00080000;
+        // WS_EX_NOACTIVATE: the overlay never takes activation, so showing it doesn't steal focus
+        // from the main window (which would deactivate it and freeze its menu bar).
+        internal const uint WS_EX_NOACTIVATE = 0x08000000;
+
         [Flags]
         public enum ClassStyles : uint
         {
@@ -154,8 +163,19 @@ namespace Ryujinx.Ava.UI.Helpers
 
         [LibraryImport("user32.dll", SetLastError = true)]
         public static partial ushort GetAsyncKeyState(int nVirtKey);
-        
+
         [LibraryImport("user32.dll", SetLastError = true)]
         public static partial int MessageBoxA(nint hWnd, [MarshalAs(UnmanagedType.LPStr)] string text, [MarshalAs(UnmanagedType.LPStr)] string caption, uint type);
+
+        // [Nextendo] Rounded corners for the in-game toast overlay. A transparent top-level over the
+        // game's native surface paints its "transparent" areas solid black, so the rectangular window
+        // corners around a rounded panel show as black triangles. A GDI window region (SetWindowRgn)
+        // does NOT clip Avalonia's DirectComposition content, so it leaves them black; DWM's window
+        // corner preference cuts the window at the compositor and the corners show the game instead.
+        internal const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+        internal const int DWMWCP_ROUND = 2;
+
+        [LibraryImport("dwmapi.dll")]
+        public static partial int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
     }
 }

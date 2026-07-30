@@ -87,6 +87,7 @@ namespace Ryujinx.Ava.Common
             ["0100f8f0000a2000"] = "Splatoon 2",
             ["01003bc0000a0000"] = "Splatoon 2",
             ["01003c700009c800"] = "Splatoon 2",
+            ["01006f8002326000"] = "Animal Crossing: New Horizons",
         };
     }
 }

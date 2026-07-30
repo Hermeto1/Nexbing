@@ -24,6 +24,10 @@ namespace Ryujinx.Ava.UI.Models
 
         public bool IsOnline => OnlineStatus != 0;
 
+        /// <summary>True when online AND in a game (has a title id) — any game, Nextendo or not.
+        /// Drives the Discord-style "active now" overlapping-avatars row.</summary>
+        public bool IsInGame => IsOnline && !string.IsNullOrEmpty(AppId);
+
         /// <summary>
         /// Green when online, dimmed grey when not — the dot on the avatar. Typed as a brush
         /// rather than a hex string: every other colour binding in the app is, and a string would

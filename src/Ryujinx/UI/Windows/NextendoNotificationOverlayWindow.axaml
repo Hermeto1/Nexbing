@@ -1,0 +1,50 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:helpers="clr-namespace:Ryujinx.Ava.UI.Helpers"
+        xmlns:models="clr-namespace:Ryujinx.Ava.UI.Models"
+        x:Class="Ryujinx.Ava.UI.Windows.NextendoNotificationOverlayWindow"
+        Title="NextendoNotifications">
+    <!-- [Nextendo] Switch-style in-game toasts. A separate transparent, no-activate window, sized to
+         its content and shown only in-game (the game render is a native child window that paints over
+         Avalonia, so an in-window overlay would be hidden behind it).
+
+         Transparency over the game paints solid black, so we never leave a transparent area: the whole
+         window is ONE opaque panel, and the toasts sit on it. Its corners are rounded by DWM (the
+         desktop compositor cuts the window, so the corners show the game — a GDI window region does NOT
+         clip Avalonia's DirectComposition content, which is why the corners used to stay black). -->
+    <Border Name="ToastPanel" Background="#FF15161A" CornerRadius="8" Padding="6">
+        <ItemsControl Name="ToastHost"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Top"
+                      IsHitTestVisible="False">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Vertical" Spacing="6" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="models:NextendoToastModel">
+                    <Border Background="#FF25282E" CornerRadius="8" Padding="12,10" MinWidth="256" MaxWidth="430">
+                        <Grid ColumnDefinitions="Auto,*">
+                            <Panel Grid.Column="0" Width="42" Height="42" VerticalAlignment="Center">
+                                <Image Width="42" Height="42" Stretch="UniformToFill"
+                                       Source="{Binding Image, Converter={x:Static helpers:BitmapArrayValueConverter.Instance}}">
+                                    <Image.Clip>
+                                        <EllipseGeometry Rect="0,0,42,42" />
+                                    </Image.Clip>
+                                </Image>
+                                <Ellipse Width="42" Height="42" Stroke="#40FFFFFF" StrokeThickness="1" />
+                            </Panel>
+                            <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="13"
+                                           Foreground="White" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Text}" FontSize="12"
+                                           Foreground="#E5E5E5" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </Border>
+</Window>

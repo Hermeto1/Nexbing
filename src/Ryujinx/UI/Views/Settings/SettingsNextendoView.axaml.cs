@@ -21,6 +21,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using AccAccountManager = Ryujinx.HLE.HOS.Services.Account.Acc.AccountManager;
 using AccUserProfile = Ryujinx.HLE.HOS.Services.Account.Acc.UserProfile;
@@ -41,6 +42,9 @@ namespace Ryujinx.Ava.UI.Views.Settings
             FriendsList.ItemsSource = _friends;
             RequestsList.ItemsSource = _requests;
             HistoryList.ItemsSource = _history;
+
+            // In-game notifications toggle: reflects the persisted flag; saves immediately on change.
+            NotificationsToggle.IsChecked = NextendoNotificationSettings.Enabled;
 
             OpenSiteButton.Click += (_, _) => TryOpenSite("/register");
             CreateGuestButton.Click += async (_, _) => await CreateGuest();
@@ -161,6 +165,11 @@ namespace Ryujinx.Ava.UI.Views.Settings
             catch { /* best effort */ }
         }
 
+        private void NotificationsToggle_Changed(object sender, RoutedEventArgs e)
+        {
+            NextendoNotificationSettings.Enabled = NotificationsToggle.IsChecked == true;
+        }
+
         private async Task LoadSocial()
         {
             (List<NextendoApi.Friend> friends, List<NextendoApi.Friend> requests) = await NextendoApi.GetSocialAsync();
@@ -170,6 +179,11 @@ namespace Ryujinx.Ava.UI.Views.Settings
 
             NoFriendsText.IsVisible = _friends.Count == 0;
             RequestsPanel.IsVisible = _requests.Count > 0;
+
+            // "X / Y online" next to the Friends header — same counter as the friends window.
+            FriendsCountText.Text = _friends.Count > 0
+                ? LocaleManager.Instance.UpdateAndGetDynamicValue(LocaleKeys.Dialog_Nextendo_FriendsOnlineTotalFormat, _friends.Count(f => f.IsOnline), _friends.Count)
+                : "";
         }
 
         private static void Fill(ObservableCollection<NextendoFriendModel> target, List<NextendoApi.Friend> source)
@@ -198,7 +212,7 @@ namespace Ryujinx.Ava.UI.Views.Settings
 
         private async Task LoadHistory()
         {
-            List<NextendoApi.HistoryItem> merged = await NextendoApi.SyncHistoryAsync(CollectLocalHistory());
+            List<NextendoApi.HistoryItem> merged = await NextendoApi.SyncHistoryAsync(NextendoHistorySync.CollectLocalHistory());
 
             // [Nextendo] Réinjecte le temps de jeu du COMPTE dans la liste locale de Ryujinx
             // (sinon un nouvel install affiche "Jamais joué" alors que le compte a l'historique).
@@ -292,37 +306,6 @@ namespace Ryujinx.Ava.UI.Views.Settings
             {
                 RyujinxApp.MainWindow?.ViewModel?.RefreshView();
             }
-        }
-
-        // Collects every game ever played in this Ryujinx (all titles, not just
-        // Nextendo-compatible ones) to push to the account.
-        private static List<NextendoApi.HistoryItem> CollectLocalHistory()
-        {
-            List<NextendoApi.HistoryItem> list = [];
-            var apps = RyujinxApp.MainWindow?.ViewModel?.Applications;
-            if (apps == null)
-            {
-                return list;
-            }
-
-            foreach (ApplicationData app in apps)
-            {
-                if (app.LastPlayed == null && app.TimePlayed.TotalSeconds < 1)
-                {
-                    continue; // never played
-                }
-
-                list.Add(new NextendoApi.HistoryItem
-                {
-                    TitleId = app.IdString,
-                    Name = app.Name,
-                    IconBase64 = app.Icon is { Length: > 0 } ? Convert.ToBase64String(app.Icon) : "",
-                    Seconds = (long)app.TimePlayed.TotalSeconds,
-                    LastPlayed = app.LastPlayed?.ToUniversalTime().ToString("o") ?? "",
-                });
-            }
-
-            return list;
         }
 
         private static string FormatPlayed(long seconds)

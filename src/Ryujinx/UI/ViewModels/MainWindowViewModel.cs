@@ -301,9 +301,14 @@ namespace Ryujinx.Ava.UI.ViewModels
             // the badge next to each supported game reads them.
             Ryujinx.Ava.Common.NextendoOnlineCounts.Start(applicationLibrary);
 
-            // [Nextendo] And watch for incoming friend requests, so an invite surfaces on its own
-            // instead of waiting for the player to go looking for it.
-            Ryujinx.Ava.Common.NextendoFriendRequestWatcher.Start();
+            // [Nextendo] And the Discord-style avatars of friends currently playing each game,
+            // shown as overlapping round pictures on the right of the game row.
+            Ryujinx.Ava.Common.NextendoFriendActivity.Start(applicationLibrary);
+
+            // [Nextendo] Friend requests (and friends starting a game) now surface as in-game toasts
+            // ONLY — NextendoInGameNotifications, wired via NextendoNotificationOverlayWindow.Attach —
+            // and only for events after launch. The old emulator-wide bottom-right request popup is
+            // intentionally not started, so notifications never appear outside a game.
         }
 
         #region Properties
@@ -2109,6 +2114,7 @@ namespace Ryujinx.Ava.UI.ViewModels
                 _nextendoSaveTimer?.Dispose();
                 _nextendoSaveTimer = null;
                 await FlushNextendoSaveAsync();
+                await Ryujinx.Ava.Common.NextendoHistorySync.PushAsync("load-cancel");
                 return;
             }
             finally
@@ -2215,6 +2221,12 @@ namespace Ryujinx.Ava.UI.ViewModels
             }
 
             IsGameRunning = false;
+
+            // [Nextendo] Push play history now the game has ended (the Stop action or a caught crash).
+            // AppHost.Dispose already wrote this session's play time to the title's metadata, so the
+            // push includes it. Fire-and-forget: the UI returns to the game list either way. The
+            // window-close path (Alt+F4) is handled separately in MainWindow.OnClosing, which awaits it.
+            _ = Ryujinx.Ava.Common.NextendoHistorySync.PushAsync("game-exit");
 
             Dispatcher.UIThread.InvokeAsync(async () =>
             {

@@ -141,6 +141,10 @@ namespace Ryujinx.Ava.UI.Windows
 
             NotificationHelper.SetNotificationManager(this);
 
+            // [Nextendo] Wire the Switch-style in-game toast overlay (a separate transparent, topmost,
+            // click-through window — the game render is a native surface that paints over Avalonia).
+            NextendoNotificationOverlayWindow.Attach(this);
+
             Executor.ExecuteBackgroundAsync(async () =>
             {
                 // [Nextendo] Warm the remote gate at startup, then ENFORCE the mandatory update:
@@ -709,9 +713,11 @@ namespace Ryujinx.Ava.UI.Windows
                         MainContent = null;
 
                         // [Nextendo] Closing the window swaps out the normal AppHost_AppExit
-                        // (which uploads the save); push it here so saves sync on window-close
-                        // too, not only via "Actions > Stop emulation". Awaited before Close().
+                        // (which uploads the save AND pushes play history); do both here so they
+                        // sync on window-close (Alt+F4) too, not only via "Actions > Stop emulation".
+                        // Awaited before Close() so they finish before the process exits.
                         await ViewModel.FlushNextendoSaveAsync();
+                        await Ryujinx.Ava.Common.NextendoHistorySync.PushAsync("window-close");
 
                         Close();
                     });

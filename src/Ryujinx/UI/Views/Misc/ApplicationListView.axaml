@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:helpers="clr-namespace:Ryujinx.Ava.UI.Helpers"
+    xmlns:models="clr-namespace:Ryujinx.Ava.UI.Models"
     xmlns:ui="clr-namespace:FluentAvalonia.UI.Controls;assembly=FluentAvalonia"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:ext="clr-namespace:Ryujinx.Ava.Common.Markup"
@@ -64,7 +65,9 @@
                                     Margin="0,0,5,0"
                                     BorderBrush="{DynamicResource ThemeControlBorderColor}"
                                     BorderThickness="0,0,1,0">
+                                    <Grid ColumnDefinitions="*,Auto">
                                     <StackPanel
+                                        Grid.Column="0"
                                         HorizontalAlignment="Left"
                                         VerticalAlignment="Top"
                                         Orientation="Vertical"
@@ -158,6 +161,40 @@
                                             </StackPanel>
                                         </Border>
                                     </StackPanel>
+                                    <!-- [Nextendo] Friends currently playing THIS game: round
+                                         overlapping avatars (Discord-style), up to 5. Sits at the
+                                         right of the info column, just left of the separator line;
+                                         hidden when nobody is in the game. Ellipse+ImageBrush gives a
+                                         true circle (a Border+CornerRadius leaves square corners). -->
+                                    <ItemsControl
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        Margin="8,0,8,0"
+                                        Padding="8,0,0,0"
+                                        ClipToBounds="False"
+                                        IsVisible="{Binding HasFriendsInGame}"
+                                        ItemsSource="{Binding FriendsInGame}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" ClipToBounds="False" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="models:NextendoFriendModel">
+                                                <Panel Width="30" Height="30" Margin="-8,0,0,0"
+                                                       ClipToBounds="False" ToolTip.Tip="{Binding StatusText}">
+                                                    <Image Width="30" Height="30" Stretch="UniformToFill"
+                                                           Source="{Binding Image, Converter={x:Static helpers:BitmapArrayValueConverter.Instance}}">
+                                                        <Image.Clip>
+                                                            <EllipseGeometry Rect="0,0,30,30" />
+                                                        </Image.Clip>
+                                                    </Image>
+                                                    <Ellipse Width="30" Height="30" Stroke="#252525" StrokeThickness="2" />
+                                                </Panel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    </Grid>
                                 </Border>
                                 <StackPanel
                                     Grid.Column="3"
@@ -166,8 +203,8 @@
                                     VerticalAlignment="Top"
                                     Orientation="Vertical"
                                     Spacing="5">
-                                    <Button 
-                                        Click="IdString_OnClick" 
+                                    <Button
+                                        Click="IdString_OnClick"
                                         HorizontalContentAlignment="Left" 
                                         VerticalAlignment="Center"
                                         Background="{DynamicResource AppListBackgroundColor}"

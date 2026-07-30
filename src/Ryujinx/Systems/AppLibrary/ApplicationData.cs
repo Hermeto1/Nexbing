@@ -15,7 +15,10 @@ using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using Ryujinx.HLE.FileSystem;
 using Ryujinx.HLE.Loaders.Processes.Extensions;
+using Ryujinx.Ava.UI.Models;
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Text.Json.Serialization;
@@ -64,6 +67,33 @@ namespace Ryujinx.Ava.Systems.AppLibrary
                     ? LocaleKeys.Dialog_Nextendo_PlayerOnlineFormat
                     : LocaleKeys.Dialog_Nextendo_PlayersOnlineFormat,
                 _nextendoPlayersOnline);
+
+        // [Nextendo] Friends currently playing THIS game, shown as overlapping round avatars on the
+        // right of the game row (Discord-style). Pushed by NextendoFriendActivity, capped at 5.
+        private readonly ObservableCollection<NextendoFriendModel> _friendsInGame = [];
+
+        [JsonIgnore]
+        public ObservableCollection<NextendoFriendModel> FriendsInGame => _friendsInGame;
+
+        /// <summary>[Nextendo] True when at least one friend is in this game — drives the avatars row.</summary>
+        [JsonIgnore]
+        public bool HasFriendsInGame => _friendsInGame.Count > 0;
+
+        /// <summary>[Nextendo] Replace the friends-in-this-game set (UI thread) and refresh the row.
+        /// The ObservableCollection notifies the avatars itself; HasFriendsInGame needs a manual raise.</summary>
+        public void SetFriendsInGame(List<NextendoFriendModel> friends)
+        {
+            _friendsInGame.Clear();
+            if (friends != null)
+            {
+                foreach (NextendoFriendModel f in friends)
+                {
+                    _friendsInGame.Add(f);
+                }
+            }
+
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(HasFriendsInGame)));
+        }
 
         public bool Favorite { get; set; }
         public bool HasIndependentConfiguration { get; set; }
@@ -307,6 +337,7 @@ namespace Ryujinx.Ava.Systems.AppLibrary
             "0100f8f0000a2000" => "5.5.2",  // Splatoon 2 (EU)
             "01003bc0000a0000" => "5.5.2",  // Splatoon 2 (US)
             "01003c700009c800" => "5.5.2",  // Splatoon 2 (JP)
+            "01006f8002326000" => "3.0.3",  // Animal Crossing: New Horizons
             _ => "",
         };
 

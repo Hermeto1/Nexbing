@@ -119,6 +119,31 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc.AccountService
             byte[] deviceAccountId = new byte[0x10];
             RandomNumberGenerator.Fill(deviceAccountId);
 
+            Dictionary<string, object> claims = new()
+            {
+                { "jku", "https://e0d67c509fb203858ebcb2fe3f88c2aa.baas.nintendo.com/1.0.0/certificates" },
+                { "jti", Guid.NewGuid().ToString() },
+                { "di", Convert.ToHexString(deviceId).ToLower() },
+                { "sn", "XAW10000000000" },
+                { "bs:did", Convert.ToHexString(deviceAccountId).ToLower() },
+                // NSO membership flag — Splatoon 2 reads this LOCALLY to gate online entry.
+                { "hm", true },
+            };
+
+            // [Nextendo] Cryptographic account binding for the NEX login. The game forwards
+            // this id_token inside its NEX login extraData, but the auth server can't trust
+            // the bare account PID the game ALSO sends as its login username — a custom build
+            // could send anyone's (sequential PIDs => trivial impersonation). So we ride the
+            // signed nx2 token (an HMAC over "pid.username.expiry" keyed by a secret only the
+            // server holds) along in a custom "nnex" claim. The auth server validates that
+            // HMAC and rejects any PID the token doesn't prove. Present only when a Nextendo
+            // account is linked (online); absent otherwise, so offline is completely unaffected.
+            string nexToken = NextendoAccount.NexToken;
+            if (!string.IsNullOrEmpty(nexToken))
+            {
+                claims["nnex"] = nexToken;
+            }
+
             SecurityTokenDescriptor descriptor = new()
             {
                 Subject = new ClaimsIdentity([new Claim(JwtRegisteredClaimNames.Sub, Convert.ToHexString(rawUserId).ToLower())]),
@@ -128,16 +153,7 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc.AccountService
                 TokenType = "id_token",
                 IssuedAt = DateTime.UtcNow,
                 Expires = DateTime.UtcNow + TimeSpan.FromHours(3),
-                Claims = new Dictionary<string, object>
-                {
-                    { "jku", "https://e0d67c509fb203858ebcb2fe3f88c2aa.baas.nintendo.com/1.0.0/certificates" },
-                    { "jti", Guid.NewGuid().ToString() },
-                    { "di", Convert.ToHexString(deviceId).ToLower() },
-                    { "sn", "XAW10000000000" },
-                    { "bs:did", Convert.ToHexString(deviceAccountId).ToLower() },
-                    // NSO membership flag — Splatoon 2 reads this LOCALLY to gate online entry.
-                    { "hm", true },
-                }
+                Claims = claims,
             };
 
             return new JsonWebTokenHandler().CreateToken(descriptor);

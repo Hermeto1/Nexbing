@@ -58,10 +58,19 @@ namespace Ryujinx.Ava.Common
             };
         }
 
-        // The two NAT-check responders, at two DISTINCT addresses (the pair is required for the
-        // NAT check). Addresses come from environment variables, not baked into this open-source tree.
-        private static readonly string Nncs1 = Environment.GetEnvironmentVariable("NEXTENDO_SERVER_IP") ?? "127.0.0.1";
-        private static readonly string Nncs2 = Environment.GetEnvironmentVariable("NEXTENDO_NAT_IP") ?? "127.0.0.1";
+        // The two NAT-check responders (nncs), at two DISTINCT public addresses — the pair is required
+        // for the NAT check, which compares the external source port each one observes. They have their
+        // OWN config, DECOUPLED from the account/game backend (NEXTENDO_SERVER_IP): the backend can move
+        // (e.g. onto nx1 behind a 443 tunnel) and must NOT drag the nncs responders with it — a NAT
+        // responder has to sit on a real public IP and see the client's true source port, which a tunnel
+        // would mask. Falls back to the backend IPs for the single-host setup where they coincide.
+        // Addresses come from environment variables, not baked into this open-source tree.
+        private static readonly string Nncs1 =
+            Environment.GetEnvironmentVariable("NEXTENDO_NNCS1_IP")
+            ?? Environment.GetEnvironmentVariable("NEXTENDO_SERVER_IP") ?? "127.0.0.1";
+        private static readonly string Nncs2 =
+            Environment.GetEnvironmentVariable("NEXTENDO_NNCS2_IP")
+            ?? Environment.GetEnvironmentVariable("NEXTENDO_NAT_IP") ?? "127.0.0.1";
         private static readonly int[] _nncsPorts = [10025, 10125];
 
         // Test id the responder echoes back. The Switch sends 101/102/103; any id it knows is

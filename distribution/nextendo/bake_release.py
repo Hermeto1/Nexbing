@@ -12,6 +12,10 @@ import os, io, sys
 
 server = os.environ["NEXTENDO_SERVER_IP"].strip()
 nat = os.environ["NEXTENDO_NAT_IP"].strip()
+# nncs NAT-check responders: default to the backend IPs (single-host setup) but can be set
+# independently, so the NAT check stays put when the account/game backend moves (e.g. onto nx1).
+nncs1 = os.environ.get("NEXTENDO_NNCS1_IP", server).strip()
+nncs2 = os.environ.get("NEXTENDO_NNCS2_IP", nat).strip()
 version = sys.argv[1]
 git_hash = sys.argv[2][:7]
 
@@ -46,12 +50,21 @@ f"""            string value = Environment.GetEnvironmentVariable(envVar);
 
             return IPAddress.Parse(envVar == "NEXTENDO_NAT_IP" ? "{nat}" : "{server}");""")
 
-# 2) NextendoNetworkCheck: real nncs responders
+# 2) NextendoNetworkCheck: real nncs responders, DECOUPLED from the backend IP (bakes their own
+#    fallback so a build whose backend points at nx1 still probes the two real NAT responders)
 patch("src/Ryujinx/Common/NextendoNetworkCheck.cs",
-'''        private static readonly string Nncs1 = Environment.GetEnvironmentVariable("NEXTENDO_SERVER_IP") ?? "127.0.0.1";
-        private static readonly string Nncs2 = Environment.GetEnvironmentVariable("NEXTENDO_NAT_IP") ?? "127.0.0.1";''',
-f'''        private static readonly string Nncs1 = Environment.GetEnvironmentVariable("NEXTENDO_SERVER_IP") ?? "{server}";
-        private static readonly string Nncs2 = Environment.GetEnvironmentVariable("NEXTENDO_NAT_IP") ?? "{nat}";''')
+'''        private static readonly string Nncs1 =
+            Environment.GetEnvironmentVariable("NEXTENDO_NNCS1_IP")
+            ?? Environment.GetEnvironmentVariable("NEXTENDO_SERVER_IP") ?? "127.0.0.1";
+        private static readonly string Nncs2 =
+            Environment.GetEnvironmentVariable("NEXTENDO_NNCS2_IP")
+            ?? Environment.GetEnvironmentVariable("NEXTENDO_NAT_IP") ?? "127.0.0.1";''',
+f'''        private static readonly string Nncs1 =
+            Environment.GetEnvironmentVariable("NEXTENDO_NNCS1_IP")
+            ?? Environment.GetEnvironmentVariable("NEXTENDO_SERVER_IP") ?? "{nncs1}";
+        private static readonly string Nncs2 =
+            Environment.GetEnvironmentVariable("NEXTENDO_NNCS2_IP")
+            ?? Environment.GetEnvironmentVariable("NEXTENDO_NAT_IP") ?? "{nncs2}";''')
 
 # 3) ReleaseInformation: stamp version/channel/config so IsValid is true (gates active)
 patch("src/Ryujinx.Common/ReleaseInformation.cs",

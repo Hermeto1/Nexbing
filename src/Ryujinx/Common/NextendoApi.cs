@@ -650,19 +650,25 @@ namespace Ryujinx.Ava.Common
             string state = RandUrl(24);
 
             // Loopback listener on a free port, 127.0.0.1 only (loopback needs no admin/URL ACL).
-            int port = FreeLoopbackPort();
-            string redirectUri = $"http://127.0.0.1:{port}/callback";
-            HttpListener listener = new();
-            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            // A RAW TcpListener, NOT HttpListener: on Linux/macOS HttpListener is a fragile managed
+            // shim (only Windows gets the http.sys kernel driver), and its loopback callback never
+            // fired for Linux users — the browser authorised, but this listener was never hit, so the
+            // account never linked. Reading the single GET request line off a raw socket behaves
+            // identically on every OS.
+            TcpListener listener;
+            int port;
             try
             {
+                listener = new TcpListener(IPAddress.Loopback, 0);
                 listener.Start();
+                port = ((IPEndPoint)listener.LocalEndpoint).Port;
             }
             catch (Exception ex)
             {
                 return (false, $"Impossible d'ouvrir un port local : {ex.Message}");
             }
 
+            string redirectUri = $"http://127.0.0.1:{port}/callback";
             string authorizeUrl =
                 $"{BaseUrl()}/api/oauth/authorize?response_type=code&client_id=nextendo-emulator" +
                 $"&redirect_uri={Uri.EscapeDataString(redirectUri)}&scope=identity+friends" +
@@ -674,35 +680,49 @@ namespace Ryujinx.Ava.Common
             }
             catch (Exception ex)
             {
-                listener.Close();
+                listener.Stop();
                 return (false, $"Impossible d'ouvrir le navigateur : {ex.Message}");
             }
 
+            Logger.Info?.Print(LogClass.Application,
+                $"[Nextendo] OAuth: browser opened, waiting for loopback callback on 127.0.0.1:{port}");
+
             // Wait for the browser to hit the loopback callback (max 5 minutes).
-            HttpListenerContext ctx;
+            string code, gotState, oauthError;
             try
             {
-                Task<HttpListenerContext> pending = listener.GetContextAsync();
-                if (await Task.WhenAny(pending, Task.Delay(TimeSpan.FromMinutes(5))) != pending)
-                {
-                    listener.Close();
-                    return (false, "Délai de connexion dépassé.");
-                }
-                ctx = await pending;
+                using System.Threading.CancellationTokenSource timeout = new(TimeSpan.FromMinutes(5));
+                using Socket socket = await listener.AcceptSocketAsync(timeout.Token);
+                using NetworkStream stream = new(socket, ownsSocket: false);
+
+                string requestTarget = await ReadRequestTargetAsync(stream, timeout.Token);
+                Uri callback = new("http://127.0.0.1" +
+                    (requestTarget.StartsWith('/') ? requestTarget : "/" + requestTarget));
+                Dictionary<string, string> query = ParseQuery(callback.Query);
+                query.TryGetValue("code", out code);
+                query.TryGetValue("state", out gotState);
+                query.TryGetValue("error", out oauthError);
+
+                bool good = string.IsNullOrEmpty(oauthError) && !string.IsNullOrEmpty(code) && gotState == state;
+                Logger.Info?.Print(LogClass.Application,
+                    $"[Nextendo] OAuth: loopback callback received (code={(string.IsNullOrEmpty(code) ? "none" : "yes")}, state_ok={gotState == state}, error={oauthError ?? "none"})");
+
+                await WriteLoopbackResponseAsync(stream, good);
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Warning?.Print(LogClass.Application,
+                    "[Nextendo] OAuth: no loopback callback within 5 min — the browser never reached 127.0.0.1 (sandboxed browser / firewall?)");
+                return (false, "Délai de connexion dépassé.");
             }
             catch (Exception ex)
             {
-                listener.Close();
                 return (false, ex.Message);
             }
-
-            string code = ctx.Request.QueryString["code"];
-            string gotState = ctx.Request.QueryString["state"];
-            string oauthError = ctx.Request.QueryString["error"];
-            bool good = string.IsNullOrEmpty(oauthError) && !string.IsNullOrEmpty(code) && gotState == state;
-
-            await WriteLoopbackPageAsync(ctx, good);
-            listener.Close();
+            finally
+            {
+                listener.Stop();
+            }
 
             if (!string.IsNullOrEmpty(oauthError))
             {
@@ -756,28 +776,68 @@ namespace Ryujinx.Ava.Common
             }
         }
 
-        private static async Task WriteLoopbackPageAsync(HttpListenerContext ctx, bool ok)
+        // Read just the HTTP request line's target from the loopback callback, i.e. the
+        // "/callback?code=...&state=..." in "GET /callback?... HTTP/1.1". We only need the first line;
+        // the browser sends it immediately, so a single read of a few KB always contains it.
+        private static async Task<string> ReadRequestTargetAsync(NetworkStream stream, System.Threading.CancellationToken ct)
+        {
+            byte[] buf = new byte[8192];
+            int total = 0;
+            while (total < buf.Length)
+            {
+                int n = await stream.ReadAsync(buf.AsMemory(total, buf.Length - total), ct);
+                if (n <= 0)
+                {
+                    break;
+                }
+
+                total += n;
+                if (Array.IndexOf(buf, (byte)'\n', 0, total) >= 0)
+                {
+                    break; // reached the end of the request line
+                }
+            }
+
+            string firstLine = Encoding.ASCII.GetString(buf, 0, total).Split('\n', 2)[0].TrimEnd('\r');
+            string[] parts = firstLine.Split(' ');
+            return parts.Length >= 2 ? parts[1] : "/";
+        }
+
+        private static Dictionary<string, string> ParseQuery(string query)
+        {
+            Dictionary<string, string> result = new(StringComparer.Ordinal);
+            foreach (string pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = pair.IndexOf('=');
+                string key = eq < 0 ? pair : pair[..eq];
+                string value = eq < 0 ? "" : pair[(eq + 1)..];
+                result[Uri.UnescapeDataString(key)] = Uri.UnescapeDataString(value);
+            }
+
+            return result;
+        }
+
+        private static async Task WriteLoopbackResponseAsync(NetworkStream stream, bool ok)
         {
             string inner = ok
                 ? "<h1 style='color:#33E86B'>✓ Connexion réussie</h1><p>Tu peux fermer cet onglet et retourner à l'émulateur Nextendo.</p>"
                 : "<h1 style='color:#ff8a8a'>Connexion annulée</h1><p>Retourne à l'émulateur Nextendo et réessaie.</p>";
-            byte[] buf = Encoding.UTF8.GetBytes(
+            byte[] body = Encoding.UTF8.GetBytes(
                 "<!doctype html><meta charset=utf-8><title>Nextendo</title>" +
                 "<body style='font-family:system-ui,sans-serif;background:#0f1115;color:#e7e9ee;display:grid;place-items:center;height:100vh;margin:0'>" +
                 "<div style='text-align:center;max-width:420px'>" + inner + "</div>");
-            ctx.Response.ContentType = "text/html; charset=utf-8";
-            ctx.Response.ContentLength64 = buf.Length;
-            try { await ctx.Response.OutputStream.WriteAsync(buf); } catch { /* browser may have closed */ }
-            try { ctx.Response.OutputStream.Close(); } catch { }
-        }
-
-        private static int FreeLoopbackPort()
-        {
-            TcpListener l = new(IPAddress.Loopback, 0);
-            l.Start();
-            int port = ((IPEndPoint)l.LocalEndpoint).Port;
-            l.Stop();
-            return port;
+            byte[] header = Encoding.ASCII.GetBytes(
+                "HTTP/1.1 200 OK\r\n" +
+                "Content-Type: text/html; charset=utf-8\r\n" +
+                $"Content-Length: {body.Length}\r\n" +
+                "Connection: close\r\n\r\n");
+            try
+            {
+                await stream.WriteAsync(header);
+                await stream.WriteAsync(body);
+                await stream.FlushAsync();
+            }
+            catch { /* browser may have closed */ }
         }
 
         private static string RandUrl(int nbytes) => Base64Url(RandomNumberGenerator.GetBytes(nbytes));

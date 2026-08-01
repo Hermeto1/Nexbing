@@ -170,7 +170,6 @@
         Header="{ext:Locale Dialog_Nextendo_ContextMenuDownloadByaml}"
         Icon="{ext:Icon fa-solid fa-cloud-arrow-down}" />
     <MenuItem
-        IsVisible="{Binding SelectedApplication.IsNextendoCompatible, FallbackValue=False}"
         Command="{Binding OpenModStore}"
         CommandParameter="{Binding}"
         Header="{ext:Locale Dialog_Nextendo_ContextMenuModStore}"

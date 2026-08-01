@@ -1,17 +1,35 @@
+using Ryujinx.Common.Configuration;
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Ryujinx.Horizon.Bcat.Ipc
 {
-    // Serves BCAT delivery-cache content from a plain host folder next to the emulator:
-    //   <exe dir>/bcat-seed/<directoryName>/<fileName>
+    // Serves BCAT delivery-cache content from a plain host folder:
+    //   <bcat-seed root>/<directoryName>/<fileName>
     // This lets us inject the schedule data (e.g. Splatoon 2 vsdata/VSSetting_0.byaml) that a
     // live BCAT server would normally deliver, which Ryujinx never populates. Used as a fallback
     // by DeliveryCacheDirectoryService / DeliveryCacheFileService when the real (empty) cache misses.
     internal static class BcatSeed
     {
-        public static string Root => System.IO.Path.Combine(AppContext.BaseDirectory, "bcat-seed");
+        // The seed lives in the WRITABLE app-data dir — NOT next to the executable. On macOS the
+        // .app bundle (AppContext.BaseDirectory) is read-only, so the download that populates it
+        // failed there ("download failed"); same when installed under Program Files on Windows.
+        // We still read the legacy next-to-exe folder as a fallback for installs that seeded there
+        // before this move.
+        public static string Root
+        {
+            get
+            {
+                string writable = System.IO.Path.Combine(AppDataManager.BaseDirPath, "bcat-seed");
+                if (System.IO.Directory.Exists(writable))
+                {
+                    return writable;
+                }
+
+                return System.IO.Path.Combine(AppContext.BaseDirectory, "bcat-seed");
+            }
+        }
 
         public static string DirPath(string dir) => System.IO.Path.Combine(Root, dir);
 

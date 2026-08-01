@@ -152,6 +152,44 @@ namespace Ryujinx.Ava.Common
             return http;
         }
 
+        // [Nextendo] Granular online-refusal state, mirroring the account server's /api/online-status.
+        // Restored here because the scrubbed public source dropped this member: AvaHostUIHandler needs
+        // it to explain WHY online is refused (unverified e-mail, unlinked Discord, playing elsewhere,
+        // operator-disabled) instead of always blaming a server outage.
+        public enum OnlineRefusalState
+        {
+            NotBlocked,
+            Blocked,
+            Unreachable,
+        }
+
+        // Asks the account server whether one of the online gates is refusing THIS account. Returns
+        // (state, reason) with reason in { "", "unverified", "discord_unlinked", "elsewhere",
+        // "disabled", "unknown" }. Any transport error -> Unreachable (caller shows the generic
+        // "servers unreachable" message rather than inventing a refusal).
+        public static async Task<(OnlineRefusalState state, string reason)> GetOnlineRefusalAsync()
+        {
+            try
+            {
+                using HttpClient http = Client();
+                HttpResponseMessage resp = await http.GetAsync($"{BaseUrl()}/api/online-status");
+                if (!resp.IsSuccessStatusCode)
+                {
+                    return (OnlineRefusalState.Unreachable, "");
+                }
+
+                using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+                JsonElement r = doc.RootElement;
+                bool allow = r.TryGetProperty("allow", out JsonElement a) && a.ValueKind == JsonValueKind.True;
+                string reason = r.TryGetProperty("reason", out JsonElement rs) ? (rs.GetString() ?? "") : "";
+                return allow ? (OnlineRefusalState.NotBlocked, reason) : (OnlineRefusalState.Blocked, reason);
+            }
+            catch
+            {
+                return (OnlineRefusalState.Unreachable, "");
+            }
+        }
+
         /// <summary>
         /// [Nextendo] Raised when the server definitively rejects our stored token (HTTP 401) and the
         /// local session is auto-wiped as a result. The UI subscribes to refresh the account panel and

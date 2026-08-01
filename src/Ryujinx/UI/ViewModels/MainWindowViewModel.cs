@@ -2815,10 +2815,11 @@ namespace Ryujinx.Ava.UI.ViewModels
                 });
 
 
-        // [Nextendo] Open the curated Mod Store for the selected Nextendo-compatible title.
+        // [Nextendo] Open the GameBanana-backed Mod Store for the selected title (any game — the
+        // store lists client-side cosmetic mods for every title, not only Nextendo-compatible ones).
         public static AsyncRelayCommand<MainWindowViewModel> OpenModStore { get; } =
             Commands.CreateConditional<MainWindowViewModel>(
-                vm => vm?.SelectedApplication != null && vm.SelectedApplication.IsNextendoCompatible,
+                vm => vm?.SelectedApplication != null,
                 viewModel => ModStoreView.Show(
                     viewModel.SelectedApplication.Id,
                     viewModel.SelectedApplication.Name));

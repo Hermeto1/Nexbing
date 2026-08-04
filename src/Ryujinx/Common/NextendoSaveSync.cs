@@ -17,6 +17,35 @@ namespace Ryujinx.Ava.Common
     /// </summary>
     public static class NextendoSaveSync
     {
+        // [Nextendo] The title currently being played (set on launch, cleared on a normal exit).
+        // Lets the crash handler (Program.ProcessUnhandledException) push the save best-effort when
+        // the app is terminating abnormally, on top of the periodic in-game push.
+        public static (ulong Id, string IdString)? Playing;
+
+        /// <summary>
+        /// [Nextendo] Best-effort synchronous save upload during a crash / abnormal termination.
+        /// Short timeout because the process is dying; any failure is swallowed.
+        /// </summary>
+        public static void EmergencyFlush()
+        {
+            (ulong Id, string IdString)? p = Playing;
+            if (p == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Logger.Info?.Print(LogClass.Application, $"[Nextendo] crash save-flush for {p.Value.IdString}");
+                Task push = PushAsync(p.Value.Id, p.Value.IdString);
+                push.Wait(TimeSpan.FromSeconds(8));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning?.Print(LogClass.Application, $"[Nextendo] crash save-flush failed: {ex.Message}");
+            }
+        }
+
         private static string BaseUrl()
         {
             // [Nextendo] Une seule decision, dans NextendoEndpoint : c'est elle qui choisit qui
@@ -73,6 +102,42 @@ namespace Ryujinx.Ava.Common
             catch (Exception ex)
             {
                 Logger.Warning?.Print(LogClass.Application, $"[Nextendo] save pull failed: {ex.Message}");
+            }
+        }
+
+        // [Nextendo] Fetch this title's cloud save WITHOUT importing it, so the caller can ask the
+        // user first (Switch-style "your save folder is empty — download from the cloud?"). Returns
+        // the save zip bytes, or null when there is no cloud save or the profile isn't eligible.
+        public static async Task<byte[]> FetchCloudSaveAsync(ApplicationData app)
+        {
+            if (app == null || !app.IsNextendoCompatible || !NextendoAccount.IsLinked || NextendoAccount.IsGuest || string.IsNullOrEmpty(NextendoAccount.NexToken))
+            {
+                return null;
+            }
+
+            if (!ApplicationHelper.IsNextendoProfileActive())
+            {
+                return null;
+            }
+
+            try
+            {
+                using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(30) };
+                http.DefaultRequestHeaders.Add("Authorization", "Bearer " + NextendoAccount.NexToken);
+
+                HttpResponseMessage resp = await http.GetAsync($"{BaseUrl()}/api/save/{app.IdString}");
+                if (resp.StatusCode == HttpStatusCode.NoContent || !resp.IsSuccessStatusCode)
+                {
+                    return null; // no cloud save stored yet
+                }
+
+                byte[] zip = await resp.Content.ReadAsByteArrayAsync();
+                return zip is { Length: > 0 } ? zip : null;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning?.Print(LogClass.Application, $"[Nextendo] cloud save fetch failed: {ex.Message}");
+                return null;
             }
         }
 

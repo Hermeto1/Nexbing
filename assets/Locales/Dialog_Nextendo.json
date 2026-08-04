@@ -1,6 +1,36 @@
 {
   "Locales": [
     {
+      "ID": "CloudSaveEmptyTitle",
+      "Translations": {
+        "ar_SA": "Cloud save available", "de_DE": "Cloud-Speicherstand verfügbar", "el_GR": "Cloud save available", "en_US": "Cloud save available", "es_ES": "Partida guardada en la nube disponible", "fr_FR": "Sauvegarde cloud disponible", "he_IL": "Cloud save available", "it_IT": "Salvataggio nel cloud disponibile", "ja_JP": "クラウドセーブが利用可能", "ko_KR": "Cloud save available", "no_NO": "Cloud save available", "pl_PL": "Cloud save available", "pt_BR": "Save na nuvem disponível", "ru_RU": "Cloud save available", "sv_SE": "Cloud save available", "th_TH": "Cloud save available", "tr_TR": "Cloud save available", "uk_UA": "Cloud save available", "zh_CN": "有可用的云存档", "zh_TW": "有可用的雲端存檔"
+      }
+    },
+    {
+      "ID": "CloudSaveEmptyFormat",
+      "Translations": {
+        "ar_SA": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "de_DE": "Dein Speicherordner ist leer, aber du hast einen Cloud-Speicherstand für {0}. Herunterladen?", "el_GR": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "en_US": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "es_ES": "Tu carpeta de guardado está vacía, pero tienes una partida en la nube de {0}. ¿Descargarla?", "fr_FR": "Ton dossier de sauvegarde est vide, mais tu as une sauvegarde dans le cloud pour {0}. La télécharger ?", "he_IL": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "it_IT": "La cartella dei salvataggi è vuota, ma hai un salvataggio nel cloud per {0}. Scaricarlo?", "ja_JP": "セーブフォルダが空ですが、{0} のクラウドセーブがあります。ダウンロードしますか？", "ko_KR": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "no_NO": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "pl_PL": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "pt_BR": "Sua pasta de save está vazia, mas você tem um save na nuvem de {0}. Baixar?", "ru_RU": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "sv_SE": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "th_TH": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "tr_TR": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "uk_UA": "Your save folder is empty, but you have a cloud save for {0}. Download it?", "zh_CN": "你的存档文件夹为空，但云端有 {0} 的存档。要下载吗？", "zh_TW": "你的存檔資料夾是空的，但雲端有 {0} 的存檔。要下載嗎？"
+      }
+    },
+    {
+      "ID": "CloudSaveDownloadBtn",
+      "Translations": {
+        "ar_SA": "Download", "de_DE": "Herunterladen", "el_GR": "Download", "en_US": "Download", "es_ES": "Descargar", "fr_FR": "Télécharger", "he_IL": "Download", "it_IT": "Scarica", "ja_JP": "ダウンロード", "ko_KR": "Download", "no_NO": "Download", "pl_PL": "Download", "pt_BR": "Baixar", "ru_RU": "Download", "sv_SE": "Download", "th_TH": "Download", "tr_TR": "Download", "uk_UA": "Download", "zh_CN": "下载", "zh_TW": "下載"
+      }
+    },
+    {
+      "ID": "CloudSaveLaunchWithoutBtn",
+      "Translations": {
+        "ar_SA": "Launch without", "de_DE": "Ohne starten", "el_GR": "Launch without", "en_US": "Launch without", "es_ES": "Iniciar sin ella", "fr_FR": "Lancer sans", "he_IL": "Launch without", "it_IT": "Avvia senza", "ja_JP": "そのまま起動", "ko_KR": "Launch without", "no_NO": "Launch without", "pl_PL": "Launch without", "pt_BR": "Iniciar sem", "ru_RU": "Launch without", "sv_SE": "Launch without", "th_TH": "Launch without", "tr_TR": "Launch without", "uk_UA": "Launch without", "zh_CN": "不下载直接启动", "zh_TW": "不下載直接啟動"
+      }
+    },
+    {
+      "ID": "CloudSaveOverwriteWarn",
+      "Translations": {
+        "ar_SA": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "de_DE": "Wenn du ohne Herunterladen startest, wird dein Cloud-Speicherstand bei der nächsten Synchronisierung durch deinen neuen Fortschritt überschrieben.", "el_GR": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "en_US": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "es_ES": "Si inicias sin descargarla, tu partida en la nube se sobrescribirá con tu nuevo progreso en la próxima sincronización.", "fr_FR": "Si tu lances sans télécharger, ta sauvegarde cloud sera écrasée par ta nouvelle progression à la prochaine synchronisation.", "he_IL": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "it_IT": "Se avvii senza scaricarlo, il tuo salvataggio nel cloud verrà sovrascritto dai nuovi progressi alla prossima sincronizzazione.", "ja_JP": "ダウンロードせずに起動すると、次回の同期時にクラウドセーブが新しい進行状況で上書きされます。", "ko_KR": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "no_NO": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "pl_PL": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "pt_BR": "Se iniciar sem baixar, seu save na nuvem será sobrescrito pelo seu novo progresso na próxima sincronização.", "ru_RU": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "sv_SE": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "th_TH": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "tr_TR": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "uk_UA": "If you launch without downloading, your cloud save will be overwritten by your new progress on the next sync.", "zh_CN": "如果不下载直接启动，下次同步时你的云存档将被新的进度覆盖。", "zh_TW": "如果不下載直接啟動，下次同步時你的雲端存檔將被新的進度覆蓋。"
+      }
+    },
+    {
       "ID": "AcceptRequestButton",
       "Translations": {
         "ar_SA": "قبول",

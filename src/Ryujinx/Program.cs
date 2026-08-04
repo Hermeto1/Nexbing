@@ -506,6 +506,9 @@ namespace Ryujinx.Ava
 
             if (isTerminating)
             {
+                // [Nextendo] Best-effort: push the running game's save to the cloud before the
+                // process dies, so a crash doesn't lose progress since the last periodic push.
+                Ryujinx.Ava.Common.NextendoSaveSync.EmergencyFlush();
                 Logger.Flush();
                 Exit();
             }

@@ -239,18 +239,63 @@ namespace Ryujinx.Ava.Systems
                             ryuName = OperatingSystem.IsWindows() ? "Ryujinx.exe" : "Ryujinx";
                         }
 
-                        ProcessStartInfo processStart = new(ryuName)
-                        {
-                            UseShellExecute = true,
-                            WorkingDirectory = executableDirectory,
-                        };
+                        // [Nextendo] On Windows, relaunching straight from here raced the update
+                        // and failed with 0xc0000142 (DLL init) on a freshly-written build: this
+                        // process is still tearing down (Environment.Exit is the very next
+                        // statement) while the new one is being created, and the 75 MB executable
+                        // has only just been written. The update itself had succeeded, but the
+                        // player got an alarming error box and had to start the emulator by hand.
+                        //
+                        // Hand the relaunch to a detached shell that waits a couple of seconds
+                        // first, so the old process is gone and the files have settled. If that
+                        // fails for any reason we fall back to the direct start below, because a
+                        // clumsy relaunch is still far better than none.
+                        bool relaunched = false;
 
-                        foreach (string argument in CommandLineState.Arguments)
+                        if (OperatingSystem.IsWindows())
                         {
-                            processStart.ArgumentList.Add(argument);
+                            try
+                            {
+                                string quotedArgs = string.Join(' ',
+                                    CommandLineState.Arguments.Select(a => $"\"{a}\""));
+
+                                ProcessStartInfo delayedStart = new("cmd.exe")
+                                {
+                                    UseShellExecute = false,
+                                    CreateNoWindow = true,
+                                    WorkingDirectory = executableDirectory,
+                                };
+
+                                // `ping` rather than `timeout`, which needs a console we don't have.
+                                delayedStart.ArgumentList.Add("/c");
+                                delayedStart.ArgumentList.Add(
+                                    $"ping 127.0.0.1 -n 3 > nul & start \"\" \"{ryuName}\" {quotedArgs}");
+
+                                Process.Start(delayedStart);
+                                relaunched = true;
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Warning?.Print(LogClass.Application,
+                                    $"[Nextendo] Delayed relaunch failed ({ex.Message}); starting directly.");
+                            }
                         }
 
-                        Process.Start(processStart);
+                        if (!relaunched)
+                        {
+                            ProcessStartInfo processStart = new(ryuName)
+                            {
+                                UseShellExecute = true,
+                                WorkingDirectory = executableDirectory,
+                            };
+
+                            foreach (string argument in CommandLineState.Arguments)
+                            {
+                                processStart.ArgumentList.Add(argument);
+                            }
+
+                            Process.Start(processStart);
+                        }
                     }
 
                     Environment.Exit(0);

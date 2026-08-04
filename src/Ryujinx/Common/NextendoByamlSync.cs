@@ -7,6 +7,7 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 
 namespace Ryujinx.Ava.Common
@@ -53,6 +54,91 @@ namespace Ryujinx.Ava.Common
             // location or the legacy next-to-exe one).
             return File.Exists(Path.Combine(SeedRoot, "vsdata", "VSSetting_0.byaml"))
                 || File.Exists(Path.Combine(LegacySeedRoot, "vsdata", "VSSetting_0.byaml"));
+        }
+
+        // Stores the SHA-256 of the server BCAT zip currently extracted locally, so we can tell on
+        // the next launch whether the server's schedule has changed.
+        private static string VersionFilePath => Path.Combine(AppDataManager.BaseDirPath, "nextendo_bcat_version.txt");
+
+        /// <summary>
+        /// [Nextendo] Force-sync the local BCAT schedule with the server on launch. IsInstalled()
+        /// only checks a file EXISTS — it never noticed when the server's schedule changed, so a
+        /// player kept an outdated rotation forever and got communication errors against players on
+        /// the current one. Here we fetch the server zip, hash it, and if it differs from what's
+        /// installed we WIPE the seed and re-extract the server copy — no prompt, forced. Best-effort:
+        /// on any failure (offline, server down) we log and launch with whatever is local.
+        /// Returns true if the local schedule was refreshed.
+        /// </summary>
+        public static async Task<bool> EnsureUpToDateAsync(ApplicationData app)
+        {
+            if (app == null || !RequiresByaml(app))
+            {
+                return false;
+            }
+
+            try
+            {
+                using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
+                if (!string.IsNullOrEmpty(NextendoAccount.NexToken))
+                {
+                    http.DefaultRequestHeaders.Add("Authorization", "Bearer " + NextendoAccount.NexToken);
+                }
+
+                byte[] zip = await http.GetByteArrayAsync($"{BaseUrl()}/api/bcat/{app.IdString}");
+                if (zip == null || zip.Length == 0)
+                {
+                    return false;
+                }
+
+                string serverHash = Convert.ToHexString(SHA256.HashData(zip));
+                string localHash = null;
+                try
+                {
+                    if (File.Exists(VersionFilePath))
+                    {
+                        localHash = File.ReadAllText(VersionFilePath).Trim();
+                    }
+                }
+                catch { /* treat as unknown -> refresh */ }
+
+                // Up to date only if the hash matches AND the schedule is actually present.
+                if (string.Equals(serverHash, localHash, StringComparison.OrdinalIgnoreCase) && IsInstalled(app))
+                {
+                    return false;
+                }
+
+                // Forced refresh: wipe the seed first so files the server dropped (e.g. old stage
+                // assets) don't linger, then extract the current server copy.
+                try
+                {
+                    if (Directory.Exists(SeedRoot))
+                    {
+                        Directory.Delete(SeedRoot, recursive: true);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning?.Print(LogClass.Application, $"[Nextendo] BCAT auto-update: could not clear old seed: {ex.Message}");
+                }
+
+                Directory.CreateDirectory(SeedRoot);
+                using (MemoryStream ms = new(zip))
+                using (ZipArchive archive = new(ms, ZipArchiveMode.Read))
+                {
+                    archive.ExtractToDirectory(SeedRoot, overwriteFiles: true);
+                }
+
+                try { File.WriteAllText(VersionFilePath, serverHash); } catch { /* non-fatal */ }
+
+                Logger.Info?.Print(LogClass.Application,
+                    $"[Nextendo] BCAT auto-update: schedule refreshed ({zip.Length} B, hash {serverHash[..Math.Min(8, serverHash.Length)]})");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning?.Print(LogClass.Application, $"[Nextendo] BCAT auto-update failed (keeping local): {ex.Message}");
+                return false;
+            }
         }
 
         // Per-title "don't ask again" list.

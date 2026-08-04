@@ -1994,35 +1994,14 @@ namespace Ryujinx.Ava.UI.ViewModels
                 }
             }
 
-            // [Nextendo] Offer the online schedule (BCAT byaml) for titles that need it
-            // (Splatoon 2) — it is NOT bundled with the emulator. We download it from the
-            // Nextendo server into <exe dir>/bcat-seed/. Without it the game bounces "offline".
-            if (application.RequiresNextendoByaml
-                && !Ryujinx.Ava.Common.NextendoByamlSync.IsInstalled(application)
-                && !Ryujinx.Ava.Common.NextendoByamlSync.IsSkipped(application.IdString))
+            // [Nextendo] Force-sync the online schedule (BCAT byaml) with the server on every launch
+            // of a title that needs it (Splatoon 2). The old flow only offered a download when NO
+            // schedule existed locally and never re-checked, so players kept an outdated rotation and
+            // hit "communication errors" against players on the current one. Now we compare the local
+            // schedule's hash to the server's and force a silent refresh when they differ.
+            if (application.RequiresNextendoByaml)
             {
-                UserResult byamlChoice = await ContentDialogHelper.CreateDeniableConfirmationDialog(
-                    LocaleManager.GetFormatted(LocaleKeys.Dialog_Nextendo_ByamlNeedScheduleFormat, application.Name),
-                    LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ByamlScheduleDescription],
-                    LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ByamlDownloadButtonYes],
-                    LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ByamlDownloadButtonNo],
-                    LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ByamlDownloadButtonDontAsk],
-                    "Nextendo Network");
-
-                if (byamlChoice == UserResult.Yes)
-                {
-                    bool byamlOk = await Ryujinx.Ava.Common.NextendoByamlSync.DownloadAndInstallAsync(application);
-                    await ContentDialogHelper.CreateInfoDialog(
-                        byamlOk ? LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ByamlScheduleInstalledTitle] : LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ByamlScheduleDownloadFailedTitle],
-                        byamlOk
-                            ? LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ByamlScheduleInstalledMessage]
-                            : LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ByamlScheduleDownloadFailedMessage],
-                        LocaleManager.Instance[LocaleKeys.InputDialogOk], string.Empty, "Nextendo Network");
-                }
-                else if (byamlChoice == UserResult.Cancel) // "Ne plus demander"
-                {
-                    Ryujinx.Ava.Common.NextendoByamlSync.MarkSkipped(application.IdString);
-                }
+                await Ryujinx.Ava.Common.NextendoByamlSync.EnsureUpToDateAsync(application);
             }
 
             // [Nextendo] Download this title's cloud save and apply it BEFORE the game
@@ -2030,7 +2009,32 @@ namespace Ryujinx.Ava.UI.ViewModels
             // launching this game).
             if (application.IsNextendoVersionOk && Ryujinx.Common.Configuration.NextendoAccount.IsLinked)
             {
-                await Ryujinx.Ava.Common.NextendoSaveSync.PullAsync(application);
+                // [Nextendo] If the local save folder is EMPTY but the account has a cloud save,
+                // ask the player (Switch-style) before starting: download it, or launch anyway with
+                // a warning that a fresh save will overwrite the cloud copy on the next sync. When the
+                // local save already has content we never touch it — the push keeps the cloud backed up.
+                if (!Ryujinx.Ava.Common.ApplicationHelper.LocalSaveHasContent(application.Id))
+                {
+                    byte[] cloudSave = await Ryujinx.Ava.Common.NextendoSaveSync.FetchCloudSaveAsync(application);
+                    if (cloudSave is { Length: > 0 })
+                    {
+                        // The overwrite warning is shown INSIDE the download prompt (not after), so the
+                        // player knows up-front that launching without downloading will overwrite the cloud copy.
+                        UserResult saveChoice = await ContentDialogHelper.CreateConfirmationDialog(
+                            LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_CloudSaveEmptyTitle],
+                            LocaleManager.GetFormatted(LocaleKeys.Dialog_Nextendo_CloudSaveEmptyFormat, application.Name)
+                                + "\n\n" + LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_CloudSaveOverwriteWarn],
+                            LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_CloudSaveDownloadBtn],
+                            LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_CloudSaveLaunchWithoutBtn],
+                            "Nextendo Network",
+                            iconSymbol: 0xE753); // Segoe cloud glyph instead of the "?" icon
+
+                        if (saveChoice == UserResult.Yes)
+                        {
+                            Ryujinx.Ava.Common.ApplicationHelper.ImportNextendoSave(application.Id, application.ControlHolder, cloudSave);
+                        }
+                    }
+                }
             }
 
             // [Nextendo] Offer the shared community shader cache — only when the user runs the
@@ -2145,6 +2149,8 @@ namespace Ryujinx.Ava.UI.ViewModels
             _nextendoSaveTimer = null;
             if (application.IsNextendoVersionOk && Ryujinx.Common.Configuration.NextendoAccount.IsLinked)
             {
+                // Track the playing title so the crash handler can push its save best-effort.
+                Ryujinx.Ava.Common.NextendoSaveSync.Playing = (application.Id, application.IdString);
                 _nextendoSaveTimer = new System.Threading.Timer(
                     _ => { if (IsGameRunning) { _ = FlushNextendoSaveAsync(); } },
                     null, TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(3));
@@ -2240,6 +2246,15 @@ namespace Ryujinx.Ava.UI.ViewModels
                 SetMainContent(null);
 
                 AppHost = null;
+
+                // [Nextendo] Push the save on a normal Stop / Restart before the UI returns or the
+                // game reloads. Without this, Stop/Restart relied only on the periodic 3-min timer,
+                // so the last few minutes of progress could be lost. Alt+F4 is handled separately in
+                // MainWindow.OnClosing; abnormal exits are still covered by the periodic push.
+                _nextendoSaveTimer?.Dispose();
+                _nextendoSaveTimer = null;
+                await FlushNextendoSaveAsync();
+                Ryujinx.Ava.Common.NextendoSaveSync.Playing = null; // normal exit: no crash-flush needed
 
                 await HandleRelaunch();
             });

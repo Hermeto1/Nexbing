@@ -198,17 +198,38 @@ namespace Ryujinx.Ava.UI.Helpers
                 MinHeight = 80,
             };
 
-            content.Children.Add(new SymbolIcon
+            // [Nextendo] A symbol >= 0xE000 is a raw Segoe Fluent Icons glyph codepoint (e.g. the
+            // cloud, 0xE753) — FluentAvalonia's Symbols font has no cloud, so fall back to the
+            // Windows system icon font for those. Everything else stays a normal SymbolIcon.
+            if (symbol >= 0xE000)
             {
-                Symbol = (Symbol)symbol,
-                Margin = new Thickness(10),
-                FontSize = 40,
-                FlowDirection = FlowDirection.LeftToRight,
-                VerticalAlignment = VerticalAlignment.Center,
-                GridColumn = 0,
-                GridRow = 0,
-                GridRowSpan = 2
-            });
+                content.Children.Add(new FontIcon
+                {
+                    Glyph = char.ConvertFromUtf32(symbol),
+                    FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+                    Margin = new Thickness(10),
+                    FontSize = 40,
+                    FlowDirection = FlowDirection.LeftToRight,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    GridColumn = 0,
+                    GridRow = 0,
+                    GridRowSpan = 2
+                });
+            }
+            else
+            {
+                content.Children.Add(new SymbolIcon
+                {
+                    Symbol = (Symbol)symbol,
+                    Margin = new Thickness(10),
+                    FontSize = 40,
+                    FlowDirection = FlowDirection.LeftToRight,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    GridColumn = 0,
+                    GridRow = 0,
+                    GridRowSpan = 2
+                });
+            }
 
             content.Children.Add(new TextBlock
             {
@@ -326,7 +347,8 @@ namespace Ryujinx.Ava.UI.Helpers
             string acceptButtonText,
             string cancelButtonText,
             string title,
-            UserResult primaryButtonResult = UserResult.Yes)
+            UserResult primaryButtonResult = UserResult.Yes,
+            int iconSymbol = (int)Symbol.Help)
             => await ShowTextDialog(
                 string.IsNullOrWhiteSpace(title) ? LocaleManager.Instance[LocaleKeys.DialogConfirmationTitle] : title,
                 primaryText,
@@ -334,7 +356,7 @@ namespace Ryujinx.Ava.UI.Helpers
                 acceptButtonText,
                 string.Empty,
                 cancelButtonText,
-                (int)Symbol.Help,
+                iconSymbol,
                 primaryButtonResult);
 
         internal static async Task<UserResult> CreateDeniableConfirmationDialog(

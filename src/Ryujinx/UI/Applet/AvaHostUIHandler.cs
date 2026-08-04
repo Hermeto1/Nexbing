@@ -235,51 +235,74 @@ namespace Ryujinx.Ava.UI.Applet
 
             bool showDetails = false;
 
-            // Nextendo Network: replace the generic online-login failure with a clear,
-            // actionable message tailored to the cause. 2306-0807 = MK8/SSBU's blocked-login
-            // code; 2306-0303 = Splatoon 2's code when our auth server rejects the login.
-            if (errorCode is { Module: 2306, Description: 807 or 303 })
+            // Nextendo Network: a refused online login reaches the player as a bare
+            // "communication error" — the NEX protocol carries no reason back to the game, and
+            // every title reports a DIFFERENT code for the SAME refusal (2306-0807 MK8/SSBU,
+            // 2306-0303 Splatoon 2, 2306-0502 Animal Crossing, plus Mario Kart's 2618 family).
+            // Matching exact codes meant most refusals — including "your account is already
+            // playing somewhere else" — fell through to the generic dialog with no explanation.
+            // So match the online modules as a whole and let the SERVER decide whether one of
+            // our gates is actually to blame; see the NotBlocked case below for why that is safe.
+            if (errorCode is { Module: 2306 or 2307 or 2618 })
             {
-                title = LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_OnlineUnavailableTitle];
+                string nextendoMessage = null;
 
                 Ryujinx.Ava.Common.NextendoBeta.BlockReason remote = Ryujinx.Ava.Common.NextendoBeta.Evaluate();
                 if (remote != Ryujinx.Ava.Common.NextendoBeta.BlockReason.None)
                 {
                     // Remote kill-switch / forced update / servers unreachable.
-                    message = "\n" + Ryujinx.Ava.Common.NextendoBeta.Message(remote);
+                    nextendoMessage = Ryujinx.Ava.Common.NextendoBeta.Message(remote);
                 }
                 else if (Ryujinx.Common.Configuration.NextendoAccount.OnlineBlocked)
                 {
                     // This title is on a version the server doesn't support.
-                    message = "\n" + LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_OnlineVersionIncompatibleBody];
+                    nextendoMessage = LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_OnlineVersionIncompatibleBody];
                 }
                 else if (!Ryujinx.Common.Configuration.NextendoAccount.IsLinked)
                 {
                     // No online profile yet — point to where they can create one.
-                    message = "\n" + LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_OnlineProblemNoProfile];
+                    nextendoMessage = LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_OnlineProblemNoProfile];
                 }
                 else
                 {
-                    // The account IS linked and the servers ARE up, so the NEX auth rejected us on
-                    // purpose — one of the online gates. That protocol carries no reason back to the
-                    // client, so ask the account server WHY and say it plainly. Falling back to
+                    // The account IS linked and the servers ARE up. Ask the account server whether
+                    // one of the online gates is refusing us, and say it plainly. Falling back to
                     // "servers unreachable" for every gate told players a maintenance lie: an
-                    // unverified email or an unlinked Discord looked like our outage, and the player
-                    // had no way to know what to fix.
-                    string reason = Ryujinx.Ava.Common.NextendoApi.GetOnlineRefusalReasonAsync()
-                        .GetAwaiter().GetResult();
+                    // unverified email or an unlinked Discord looked like our outage, and the
+                    // player had no way to know what to fix.
+                    (Ryujinx.Ava.Common.NextendoApi.OnlineRefusalState state, string reason) =
+                        Ryujinx.Ava.Common.NextendoApi.GetOnlineRefusalAsync().GetAwaiter().GetResult();
 
-                    message = "\n" + LocaleManager.Instance[reason switch
+                    switch (state)
                     {
-                        "unverified"       => LocaleKeys.Dialog_Nextendo_OnlineRefusedUnverified,
-                        "discord_unlinked" => LocaleKeys.Dialog_Nextendo_OnlineRefusedDiscordUnlinked,
-                        "elsewhere"        => LocaleKeys.Dialog_Nextendo_OnlineRefusedElsewhere,
-                        "disabled"         => LocaleKeys.Dialog_Nextendo_OnlineRefusedDisabled,
-                        "unknown"          => LocaleKeys.Dialog_Nextendo_OnlineRefusedUnknown,
-                        // No reason, or the account server is unreachable: "unreachable" is then
-                        // the honest answer, not a fallback that hides a gate.
-                        _ => LocaleKeys.Dialog_Nextendo_OnlineServersUnreachable,
-                    }];
+                        case Ryujinx.Ava.Common.NextendoApi.OnlineRefusalState.Blocked:
+                            nextendoMessage = LocaleManager.Instance[reason switch
+                            {
+                                "unverified"       => LocaleKeys.Dialog_Nextendo_OnlineRefusedUnverified,
+                                "discord_unlinked" => LocaleKeys.Dialog_Nextendo_OnlineRefusedDiscordUnlinked,
+                                "elsewhere"        => LocaleKeys.Dialog_Nextendo_OnlineRefusedElsewhere,
+                                "disabled"         => LocaleKeys.Dialog_Nextendo_OnlineRefusedDisabled,
+                                // A gate we have no wording for yet: still own it as our refusal
+                                // rather than dressing it up as an outage.
+                                _                  => LocaleKeys.Dialog_Nextendo_OnlineRefusedUnknown,
+                            }];
+                            break;
+
+                        case Ryujinx.Ava.Common.NextendoApi.OnlineRefusalState.Unreachable:
+                            nextendoMessage = LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_OnlineServersUnreachable];
+                            break;
+
+                        // NotBlocked: nothing on our side is refusing this account, so this is a
+                        // genuine network / P2P failure (a hole-punch that never completed, a peer
+                        // that dropped mid-session). Leave the game's own message untouched —
+                        // blaming a gate here would just swap the old lie for a new one.
+                    }
+                }
+
+                if (nextendoMessage != null)
+                {
+                    title = LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_OnlineUnavailableTitle];
+                    message = "\n" + nextendoMessage;
                 }
             }
 

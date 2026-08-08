@@ -35,9 +35,9 @@ namespace Ryujinx.Ava.Common
         // base dir is always writable (and portable-mode aware).
         private static string SeedRoot => Path.Combine(AppDataManager.BaseDirPath, "bcat-seed");
 
-        // Legacy location used by builds before the writable-dir move; still honoured so an install
-        // that already seeded next to the exe isn't asked to re-download.
-        private static string LegacySeedRoot => Path.Combine(AppContext.BaseDirectory, "bcat-seed");
+        // [Nextendo] Legacy next-to-exe seed location REMOVED: it let a stale copy shadow the live
+        // writable one (wrong Splatoon 2 rotation) and was copied to other emulators. Only SeedRoot
+        // (writable, server-synced) is honoured now.
 
         // The marker that tells us the schedule is already installed for this title.
         // One source of truth: ApplicationData.RequiresNextendoByaml (Splatoon 2 only).
@@ -50,10 +50,8 @@ namespace Ryujinx.Ava.Common
                 return false;
             }
 
-            // vsdata/VSSetting_0.byaml is the load-bearing schedule file (either the new writable
-            // location or the legacy next-to-exe one).
-            return File.Exists(Path.Combine(SeedRoot, "vsdata", "VSSetting_0.byaml"))
-                || File.Exists(Path.Combine(LegacySeedRoot, "vsdata", "VSSetting_0.byaml"));
+            // vsdata/VSSetting_0.byaml is the load-bearing schedule file (writable, server-synced).
+            return File.Exists(Path.Combine(SeedRoot, "vsdata", "VSSetting_0.byaml"));
         }
 
         // Stores the SHA-256 of the server BCAT zip currently extracted locally, so we can tell on
@@ -180,7 +178,7 @@ namespace Ryujinx.Ava.Common
         }
 
         // Download (with a progress dialog) + extract the title's BCAT seed bundle (vsdata +
-        // coopdata + fesdata) into <exe dir>/bcat-seed/. Returns true on success.
+        // coopdata + fesdata) into the writable bcat-seed dir (SeedRoot). Returns true on success.
         public static async Task<bool> DownloadAndInstallAsync(ApplicationData app)
         {
             if (app == null)

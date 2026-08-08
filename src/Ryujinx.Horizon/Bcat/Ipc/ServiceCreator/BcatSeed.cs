@@ -12,24 +12,15 @@ namespace Ryujinx.Horizon.Bcat.Ipc
     // by DeliveryCacheDirectoryService / DeliveryCacheFileService when the real (empty) cache misses.
     internal static class BcatSeed
     {
-        // The seed lives in the WRITABLE app-data dir — NOT next to the executable. On macOS the
-        // .app bundle (AppContext.BaseDirectory) is read-only, so the download that populates it
-        // failed there ("download failed"); same when installed under Program Files on Windows.
-        // We still read the legacy next-to-exe folder as a fallback for installs that seeded there
-        // before this move.
-        public static string Root
-        {
-            get
-            {
-                string writable = System.IO.Path.Combine(AppDataManager.BaseDirPath, "bcat-seed");
-                if (System.IO.Directory.Exists(writable))
-                {
-                    return writable;
-                }
-
-                return System.IO.Path.Combine(AppContext.BaseDirectory, "bcat-seed");
-            }
-        }
+        // The seed lives ONLY in the WRITABLE app-data dir (portable/bcat-seed). It MUST be writable:
+        // on macOS the .app bundle (AppContext.BaseDirectory) is read-only, so the download that
+        // populates it failed there; same under Program Files on Windows.
+        //
+        // [Nextendo] The legacy next-to-exe fallback was REMOVED: shipping a static seed there let a
+        // STALE copy be served whenever the writable one was absent, and users copied that stale
+        // folder to other emulators (wrong Splatoon 2 rotation). The on-launch sync (NextendoByamlSync)
+        // keeps this single writable location current from the server, so it is the only source read.
+        public static string Root => System.IO.Path.Combine(AppDataManager.BaseDirPath, "bcat-seed");
 
         public static string DirPath(string dir) => System.IO.Path.Combine(Root, dir);
 

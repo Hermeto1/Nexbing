@@ -77,7 +77,9 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Nsd.Manager
 
             context.Memory.Read(inputPosition, addressBuffer);
 
-            string address = Encoding.UTF8.GetString(addressBuffer).TrimEnd('\0');
+            string address = Encoding.UTF8.GetString(addressBuffer);
+            int nullIdx = address.IndexOf('\0');
+            if (nullIdx >= 0) address = address.Substring(0, nullIdx);
 
             resultCode = Resolve(address, out resolvedAddress);
 

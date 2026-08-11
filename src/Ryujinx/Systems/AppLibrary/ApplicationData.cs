@@ -338,6 +338,7 @@ namespace Ryujinx.Ava.Systems.AppLibrary
             "01003bc0000a0000" => "5.5.2",  // Splatoon 2 (US)
             "01003c700009c800" => "5.5.2",  // Splatoon 2 (JP)
             "01006f8002326000" => "3.0.3",  // Animal Crossing: New Horizons
+            "0100dca0064a6000" => "1.4.0",  // Luigi's Mansion 3
             _ => "",
         };
 

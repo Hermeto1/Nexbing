@@ -83,6 +83,11 @@ namespace Ryujinx.HLE.HOS
         private static AccessControlBits.Bits AmFsPermissions => AccessControlBits.Bits.SaveDataManagement |
                                                                  AccessControlBits.Bits.CreateSaveData |
                                                                  AccessControlBits.Bits.SystemData;
+        // [Nextendo] Ces droits restent volontairement minimaux. Ils avaient ete elargis en cherchant
+        // la cause du refus d'ouverture du cache de livraison BCAT (2002-6400, PermissionDenied, sur
+        // lequel Splatoon 3 bloque au demarrage) ; le banc de test a montre que l'elargissement n'y
+        // changeait RIEN. Le vrai defaut etait le proprietaire de la sauvegarde — voir
+        // VirtualFileSystem.FixExtraData — et une fois corrige l'ouverture reussit avec ce seul bit.
         private static AccessControlBits.Bits BcatFsPermissions => AccessControlBits.Bits.SystemSaveData;
 
         private static AccessControlBits.Bits NsFsPermissions => AccessControlBits.Bits.ApplicationInfo |

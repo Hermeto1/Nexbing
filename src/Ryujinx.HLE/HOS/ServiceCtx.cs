@@ -27,6 +27,13 @@ namespace Ryujinx.HLE.HOS
         public int PollResult;              // Poll: updateCount from the last non-blocking pass (>0 => an fd is ready)
         public long PollDeadlineMs;         // absolute deadline in ms (long.MaxValue for timeout == -1)
 
+        // [Nextendo] Copie GEREE du tableau pollfd, prise au moment ou le sondage est differe. Lors d'une
+        // re-verification, le gestionnaire relit les descripteurs ICI et non en memoire invitee : le tampon
+        // de type 0x21 vit dans la region de pointeurs PARTAGEE de la session, que l'IPC bsd suivant
+        // reutilise. On y relisait donc le sockaddr d'un connect ulterieur comme des descripteurs -> EBADF
+        // sur tout le sondage -> la boucle d'evenements de gRPC se coince et le jeu reste au chargement.
+        public byte[] PollInputSnapshot;
+
         public ServiceCtx(
             Switch device,
             KProcess process,

@@ -23,7 +23,14 @@ namespace Ryujinx.HLE.HOS.Services
         // Must be the maximum value used by services (highest one know is the one used by nvservices = 0x8000).
         // Having a size that is too low will cause failures as data copy will fail if the receiving buffer is
         // not large enough.
-        private const int PointerBufferSize = 0x8000;
+        // [Nextendo] Releve de 0x8000 a 0xF000 (le maximum que le champ de taille 16 bits du tampon de
+        // pointeurs HIPC sait exprimer). Un client NPLN ouvre de nombreux flux simultanes (presence, amis,
+        // catalogue, salon) ; ses requetes a tampons de pointeurs debordaient la liste de reception de 32 Ko
+        // -> KServerSession renvoyait OutOfResource -> le SendSyncRequest du fil reseau du jeu echouait et le
+        // jeu plantait a l'entree du hall. Le tas serveur de 2 Mo (SetHeapSize 0x200000) loge sans peine la
+        // region agrandie. Si 60 Ko deborde encore, la requete demande plus de 64 Ko, ce que HIPC ne peut pas
+        // exprimer : elle ne peut alors pas etre servie ici.
+        private const int PointerBufferSize = 0xF000;
 
         private static uint[] DefaultCapabilities => [
             (((uint)KScheduler.CpuCoresCount - 1) << 24) + (((uint)KScheduler.CpuCoresCount - 1) << 16) + 0x63F7u,
@@ -65,10 +72,19 @@ namespace Ryujinx.HLE.HOS.Services
             public ulong RecvListAddr;
             public long DeadlineMs;
             public IpcMessage Response;  // finalized response, set when the poll becomes ready/timed out
+
+            // [Nextendo] Copie du tableau pollfd : la re-verification lit les descripteurs ICI, pas dans la
+            // region de pointeurs invitee partagee, qu'un IPC bsd ulterieur a deja reutilisee entre-temps.
+            public byte[] InputSnapshot;
         }
 
         private readonly List<DeferredPoll> _deferredPolls = new();
         private readonly object _deferredPollsLock = new();
+
+        // [Nextendo] Adresse du tas de tampons de pointeurs du serveur, conservee pour que la passe de
+        // reponse des sondages differes puisse re-publier le descripteur de liste de reception qu'elle
+        // ecrase dans le TLS (voir RearmReceiveList).
+        private ulong _heapAddr;
 
         private int _isDisposed = 0;
 
@@ -238,6 +254,7 @@ namespace Ryujinx.HLE.HOS.Services
 
             ulong messagePtr = _selfThread.TlsAddress;
             _context.Syscall.SetHeapSize(out ulong heapAddr, 0x200000);
+            _heapAddr = heapAddr;
 
             _selfProcess.CpuMemory.Write(messagePtr + 0x0, 0);
             _selfProcess.CpuMemory.Write(messagePtr + 0x4, 2 << 10);
@@ -276,15 +293,28 @@ namespace Ryujinx.HLE.HOS.Services
                 }
 
                 // [Nextendo] deferred Bsd Poll (single-thread eventfd deadlock fix)
-                // If there are deferred polls outstanding, wake periodically (50ms) even with no IPC so
-                // we can re-check readiness/deadlines. When none are outstanding the timeout is -1,
-                // i.e. EXACTLY the original behavior for every other server and for Bsd when idle.
+                // If there are deferred polls outstanding, wake periodically even with no IPC so we can
+                // re-check readiness/deadlines. When none are outstanding the timeout is -1, i.e. EXACTLY
+                // the original behavior for every other server and for Bsd when idle.
+                //
+                // [Nextendo] 50 ms -> 1 ms. Rien ne signale cette boucle quand un socket HOTE devient
+                // lisible : le sondage differe n'apprend l'arrivee d'octets que sur ce minuteur, qui etait
+                // donc l'horloge d'aller-retour de tout le transport gRPC. Mesure sur une session de test :
+                // 10 043 des 10 587 allers-retours Send->Recv tombaient dans la tranche 50-54 ms (moyenne
+                // 50,4 ms) alors que le temps reseau reel est de 6 ms — c'est un quantificateur, pas une
+                // distribution de latence. Cela plafonne la boucle d'evenements HTTP/2 a 19,8 iterations par
+                // seconde : le hall mettait des minutes a charger, brassait 1,3 Mo de trames de controle en
+                // 10 min sans qu'un seul appel applicatif n'aboutisse, et finissait en erreur de
+                // communication. A 1 ms le reveil passe sous le temps reseau et le transport redevient limite
+                // par le reseau. Toujours restreint aux sondages differes : seul le sondage gRPC/NPLN l'arme,
+                // les titres NEX (MK8 / Splatoon 2 / SSBU / ACNH) ne different jamais et gardent
+                // loopTimeout = -1, soit le comportement d'origine au bit pres.
                 long loopTimeout = -1;
                 lock (_deferredPollsLock)
                 {
                     if (_deferredPolls.Count != 0)
                     {
-                        loopTimeout = 50_000_000; // 50ms in ns
+                        loopTimeout = 1_000_000; // 1ms in ns
                     }
                 }
 
@@ -444,8 +474,19 @@ namespace Ryujinx.HLE.HOS.Services
                             Request = request,
                             RecvListAddr = recvListAddr,
                             DeadlineMs = context.PollDeadlineMs,
+                            InputSnapshot = context.PollInputSnapshot,
                         });
                     }
+
+                    // [Nextendo] Differer saute l'ecriture de la reponse dans le TLS, plus bas, et c'est
+                    // precisement cette ecriture qui re-publie normalement le descripteur de liste de
+                    // reception du serveur (GetStream y encode recvListAddr | PointerBufferSize << 48). Sans
+                    // elle, le TLS contient encore la requete qu'on vient de consommer : la PROCHAINE requete
+                    // porteuse de tampons de pointeurs trouve slotAddr=0 et le noyau echoue sa copie avec
+                    // OutOfResource. Or cette requete suivante est elle-meme un sondage gRPC (la seule
+                    // commande bsd a tampon de reception ici), donc l'echec tuait la boucle de sondage et
+                    // faisait tomber la session TLS du jeu. On re-arme explicitement.
+                    RearmReceiveList();
 
                     // Skip the response-to-TLS write below and don't reply.
                     return false;
@@ -606,6 +647,10 @@ namespace Ryujinx.HLE.HOS.Services
                         _responseDataWriter)
                     {
                         PollForceNonBlocking = true,
+                        // [Nextendo] Fournir a la re-verification la copie du tableau pollfd, pour qu'elle
+                        // lise les descripteurs D'ORIGINE en memoire geree plutot que dans la region de
+                        // pointeurs invitee partagee, desormais reutilisee par un autre IPC bsd.
+                        PollInputSnapshot = deferred.InputSnapshot,
                     };
 
                     GetSessionObj(deferred.SessionHandle).CallCmifMethod(context);
@@ -616,6 +661,27 @@ namespace Ryujinx.HLE.HOS.Services
                     {
                         // Finalize the response exactly like Process() does for a CMIF request.
                         response.RawData = _responseDataStream.ToArray();
+
+                        // [Nextendo] Re-publier les descripteurs de tampon de pointeurs sur cette reponse
+                        // toute neuve. La re-verification a ecrit les revents dans la region de pointeurs du
+                        // serveur (IClient.Poll ecrit dans le tampon de type 0x22, que Process() y avait
+                        // redirige), mais cet IpcMessage vient d'etre construit de zero : son PtrBuff est
+                        // vide -> PointerBuffersCount = 0 dans l'en-tete -> le noyau ne copie rien vers le
+                        // jeu et le tableau pollfd garde revents = 0. C'est ce qui faisait retourner poll()
+                        // avec un compte positif alors que rien n'etait lisible : gRPC ne consommait jamais
+                        // son eventfd de reveil (le compteur montait sans fin), ne planifiait aucune lecture
+                        // de socket, et re-sondait aussitot — la tempete de sondages. Process() a deja
+                        // reecrit Request.RecvListBuff[i] en (adresse region serveur, taille) ; les re-emettre
+                        // comme descripteurs X est exactement ce que fait la reponse immediate.
+                        for (int b = 0; b < deferred.Request.RecvListBuff.Count; b++)
+                        {
+                            IpcRecvListBuffDesc buf = deferred.Request.RecvListBuff[b];
+
+                            if (buf.Position != 0 && buf.Size != 0)
+                            {
+                                response.PtrBuff.Add(new IpcPtrBuffDesc(buf.Position, (uint)b, buf.Size));
+                            }
+                        }
 
                         (ready ??= new List<DeferredPoll>()).Add(deferred);
 
@@ -654,6 +720,26 @@ namespace Ryujinx.HLE.HOS.Services
                 _context.Syscall.ReplyAndReceive(out _, ReadOnlySpan<int>.Empty, deferred.SessionHandle, 0);
                 _selfThread.HandlePostSyscall();
             }
+
+            // [Nextendo] Re-publier le descripteur de liste de reception du serveur. Chaque reponse ci-dessus
+            // a ecrase le TLS avec son propre message, donc le descripteur qui indique au noyau ou deposer les
+            // tampons de pointeurs d'une requete entrante a disparu. La reception ordinaire suivante, en haut
+            // de la boucle, trouvait alors slotAddr=0 et echouait sa copie avec OutOfResource, ce qui tuait le
+            // sondage gRPC qui venait juste de fonctionner et faisait tomber la session TLS du jeu
+            // (reconnexion toutes les 20 s).
+            RearmReceiveList();
+        }
+
+        // [Nextendo] Restaure le descripteur de liste de reception des tampons de pointeurs dans le TLS du fil
+        // serveur, a l'identique de l'initialisation faite dans ServerLoop. Appelable a repetition sans
+        // risque : n'ecrit que trois mots.
+        private void RearmReceiveList()
+        {
+            ulong messagePtr = _selfThread.TlsAddress;
+
+            _selfProcess.CpuMemory.Write(messagePtr + 0x0, 0);
+            _selfProcess.CpuMemory.Write(messagePtr + 0x4, 2 << 10);
+            _selfProcess.CpuMemory.Write(messagePtr + 0x8, _heapAddr | ((ulong)PointerBufferSize << 48));
         }
 
         private IpcMessage ReadRequest()

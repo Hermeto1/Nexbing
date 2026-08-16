@@ -127,6 +127,32 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
             LibHac.HorizonClient hos = context.Device.System.LibHacHorizonManager.AmClient;
             LibHac.Result result = hos.Fs.EnsureApplicationSaveData(out long requiredSize, applicationId, in nacp, in userId);
 
+            // [Nextendo] Provisionner AUSSI le cache de livraison BCAT du jeu, ce que l'emulateur ne
+            // faisait pas.
+            //
+            // Une console cree ce stockage au premier lancement d'un titre qui declare en avoir besoin
+            // (champ BcatDeliveryCacheStorageSize du NACP). Ryujinx ne creait que la sauvegarde
+            // utilisateur, si bien que le cache n'existait pour aucun jeu. Les titres qui empruntent le
+            // chemin BCAT moderne s'y cassaient : Splatoon 3 demande son cache au demarrage, LibHac
+            // refuse d'ouvrir un stockage jamais provisionne (2002-6400, PermissionDenied), le jeu
+            // reessaie toutes les demi-secondes puis affiche l'erreur. Splatoon 2, qui passe par la
+            // commande heritee, ne rencontrait pas ce mur — d'ou des annees sans que ca se voie.
+            if (nacp.BcatDeliveryCacheStorageSize > 0)
+            {
+                LibHac.Result bcatResult = hos.Fs.EnsureApplicationBcatDeliveryCacheStorage(out long bcatSize, applicationId, in nacp);
+
+                if (bcatResult.IsSuccess())
+                {
+                    Logger.Info?.Print(LogClass.ServiceAm,
+                        $"[Nextendo] cache de livraison BCAT pret pour {applicationId.Value:X16} ({bcatSize} octets).");
+                }
+                else
+                {
+                    Logger.Warning?.Print(LogClass.ServiceAm,
+                        $"[Nextendo] cache de livraison BCAT indisponible pour {applicationId.Value:X16} : echec 0x{bcatResult.Value:X}.");
+                }
+            }
+
             context.ResponseData.Write(requiredSize);
 
             return (ResultCode)result.Value;

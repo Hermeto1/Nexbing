@@ -53,6 +53,20 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
                     isValidEvent = true;
                 }
 
+                // [Nextendo] Un sondage qui ne demande AUCUN interet lecture/ecriture (InputEvents == 0) est
+                // VALIDE en POSIX : il attend le delai imparti et ne rapporte que POLLERR/POLLHUP. gRPC sonde
+                // son eventfd de reveil exactement ainsi pendant qu'il attend la fin d'un connect asynchrone.
+                // Le refuser avec EINVAL cassait sa boucle de sondage : il fermait le descripteur, repartait
+                // en boucle d'EBADF, et la session ne s'etablissait jamais. On l'accepte donc et on attend
+                // l'evenement de lecture, pour qu'une ecriture sur l'eventfd reveille quand meme le sondage,
+                // conformement a l'intention de gRPC ; aucun drapeau de sortie n'est pose.
+                if (evnt.Data.InputEvents == 0)
+                {
+                    waiters.Add(socket.ReadEvent);
+
+                    isValidEvent = true;
+                }
+
                 if (!isValidEvent)
                 {
                     Logger.Warning?.Print(LogClass.ServiceBsd, $"Unsupported Poll input event type: {evnt.Data.InputEvents}");
@@ -75,7 +89,13 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
 
                     if (socket.ReadEvent.WaitOne(0))
                     {
-                        if (evnt.Data.InputEvents.HasFlag(PollEventTypeMask.Input))
+                        // [Nextendo] Signaler la lisibilite pour un sondage Input ordinaire ET pour un
+                        // sondage a InputEvents == 0 : gRPC sonde son eventfd de reveil de cette seconde
+                        // maniere et attend un retour « pret » des qu'il ecrit dedans. Sans cette ligne, le
+                        // sondage restait differe indefiniment (jamais reveille) et la couche NPLN qui en
+                        // depend ne demarrait pas. Rapporter Input quand l'eventfd est lisible laisse le
+                        // reveil de gRPC aboutir.
+                        if (evnt.Data.InputEvents.HasFlag(PollEventTypeMask.Input) || evnt.Data.InputEvents == 0)
                         {
                             outputEvents |= PollEventTypeMask.Input;
                         }

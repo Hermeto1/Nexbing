@@ -188,7 +188,7 @@ namespace Ryujinx.HLE.HOS.Services.Ssl.SslService
                 return ResultCode.NoSocket;
             }
 
-            return _connection.Handshake(_hostName);
+            return _connection.Handshake(_hostName, _nextAplnProto);
         }
 
         [CommandCmif(9)]
@@ -200,7 +200,7 @@ namespace Ryujinx.HLE.HOS.Services.Ssl.SslService
                 return ResultCode.NoSocket;
             }
 
-            ResultCode result = _connection.Handshake(_hostName);
+            ResultCode result = _connection.Handshake(_hostName, _nextAplnProto);
 
             if (result == ResultCode.Success)
             {

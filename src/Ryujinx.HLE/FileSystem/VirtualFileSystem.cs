@@ -563,6 +563,12 @@ namespace Ryujinx.HLE.FileSystem
                 in extraData, in extraDataMask);
         }
 
+        // [Nextendo] Taille du cache de livraison BCAT posee par le systeme (64 Mio de donnees,
+        // 2 Mio de journal). C'est la valeur que portent les caches sains du dossier bis/user/save
+        // et celle que declare le NACP des jeux concernes.
+        private const long DefaultBcatDeliveryCacheStorageSize = 0x4000000;
+        private const long DefaultBcatDeliveryCacheJournalSize = 0x200000;
+
         private static Result FixExtraData(out bool wasFixNeeded, HorizonClient hos, in SaveDataInfo info)
         {
             wasFixNeeded = true;
@@ -582,7 +588,17 @@ namespace Ryujinx.HLE.FileSystem
 
             bool hasEmptyOwnerId = extraData.OwnerId == 0 && info.Type != SaveDataType.System;
 
-            if (!canFixByProgramId && !canFixBySaveDataId && !hasEmptyOwnerId)
+            // [Nextendo] Le proprietaire d'un cache de livraison BCAT est le module systeme bcat,
+            // JAMAIS le jeu. Le correcteur ci-dessous y gravait l'identifiant du jeu (voir plus bas),
+            // ce qui rend la sauvegarde inouvrable par bcat : le controle d'acces de LibHac compare
+            // extraData.OwnerId au programme appelant, ne trouve pas d'egalite, retombe sur
+            // MountOthersSaveData et refuse — 2002-6400 (PermissionDenied), remonte tel quel au jeu.
+            // Splatoon 3 y bute au demarrage. Cette condition repare aussi les sauvegardes deja
+            // marquees, que la condition d'OwnerId vide ne pouvait plus rattraper.
+            bool isBcatSave = info.Type is SaveDataType.Bcat or SaveDataType.SystemBcat;
+            bool hasWrongBcatOwnerId = isBcatSave && extraData.OwnerId != SystemProgramId.Bcat.Value;
+
+            if (!canFixByProgramId && !canFixBySaveDataId && !hasEmptyOwnerId && !hasWrongBcatOwnerId)
             {
                 wasFixNeeded = false;
                 return Result.Success;
@@ -598,7 +614,27 @@ namespace Ryujinx.HLE.FileSystem
 
             // The rest of the extra data can't be created from the save data info.
             // On user saves the owner ID will almost certainly be the same as the program ID.
-            if (info.Type != SaveDataType.System)
+            if (isBcatSave)
+            {
+                // [Nextendo] Exception : un cache de livraison appartient au module systeme bcat.
+                // C'est ce que pose LibHac lui-meme quand il cree le stockage
+                // (Fs.Shim.SaveDataManagement.CreateBcatSaveData), et c'est ce que portent les caches
+                // qui s'ouvrent deja ici (Splatoon 2, SSBU, Animal Crossing : OwnerId 010000000000000C).
+                extraData.OwnerId = SystemProgramId.Bcat.Value;
+
+                // Une sauvegarde reconstruite arrive avec des tailles nulles. On remet les valeurs du
+                // cache de livraison standard, identiques a celles des caches sains de ce dossier.
+                if (extraData.DataSize == 0)
+                {
+                    extraData.DataSize = DefaultBcatDeliveryCacheStorageSize;
+                }
+
+                if (extraData.JournalSize == 0)
+                {
+                    extraData.JournalSize = DefaultBcatDeliveryCacheJournalSize;
+                }
+            }
+            else if (info.Type != SaveDataType.System)
             {
                 extraData.OwnerId = info.ProgramId.Value;
             }

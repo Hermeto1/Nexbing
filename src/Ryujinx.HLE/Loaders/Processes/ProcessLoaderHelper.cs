@@ -128,6 +128,32 @@ namespace Ryujinx.HLE.Loaders.Processes
                 Logger.Error?.Print(LogClass.Application, $"Error calling EnsureApplicationSaveData. Result code {resultCode.ToStringWithName()}");
             }
 
+            // [Nextendo] Provisionner AUSSI le cache de livraison BCAT, que l'emulateur ne creait pour
+            // aucun jeu.
+            //
+            // Une console cree ce stockage au premier lancement d'un titre qui le declare dans son NACP
+            // (BcatDeliveryCacheStorageSize). Sans lui, un jeu qui emprunte le chemin BCAT moderne se
+            // fait refuser l'ouverture par LibHac - et le refus se presente comme 2002-6400
+            // (PermissionDenied), pas comme « absent », ce qui rend la cause difficile a lire.
+            // Splatoon 3 y buttait au demarrage : boucle de reessais toutes les demi-secondes, puis
+            // erreur a l'ecran. Splatoon 2 passe par la commande heritee et ne rencontrait pas ce mur.
+            if (control.BcatDeliveryCacheStorageSize > 0)
+            {
+                LibHac.Result bcatResult = device.System.LibHacHorizonManager.RyujinxClient.Fs
+                    .EnsureApplicationBcatDeliveryCacheStorage(out long bcatSize, applicationId, in control);
+
+                if (bcatResult.IsSuccess())
+                {
+                    Logger.Info?.Print(LogClass.Application,
+                        $"[Nextendo] cache de livraison BCAT pret pour {applicationId.Value:X16} ({bcatSize} octets).");
+                }
+                else
+                {
+                    Logger.Warning?.Print(LogClass.Application,
+                        $"[Nextendo] cache de livraison BCAT : {bcatResult.ToStringWithName()}");
+                }
+            }
+
             return resultCode;
         }
 

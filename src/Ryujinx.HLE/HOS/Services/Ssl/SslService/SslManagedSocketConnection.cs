@@ -131,7 +131,48 @@ namespace Ryujinx.HLE.HOS.Services.Ssl.SslService
             }
         }
 
-        public ResultCode Handshake(string hostName)
+        // [Nextendo] Parse an ALPN wire-format buffer (a sequence of [len][name] entries, exactly as
+        // the game passes it to nn::ssl::Connection::SetNextAlpnProto) into a .NET protocol list.
+        // Null/empty -> empty list, and the caller keeps its default policy.
+        private static System.Collections.Generic.List<SslApplicationProtocol> ParseAlpnWire(byte[] wire)
+        {
+            var list = new System.Collections.Generic.List<SslApplicationProtocol>();
+
+            if (wire == null)
+            {
+                return list;
+            }
+
+            int i = 0;
+            while (i < wire.Length)
+            {
+                int len = wire[i++];
+                if (len <= 0 || i + len > wire.Length)
+                {
+                    break;
+                }
+
+                string name = System.Text.Encoding.ASCII.GetString(wire, i, len);
+                i += len;
+
+                // Only the two protocols NPLN/NEX ever ask for. Unknown names are skipped on purpose:
+                // we never request others, and this avoids depending on the SslApplicationProtocol(byte[])
+                // constructor, which is missing from the packaged runtime (MissingMethodException at JIT
+                // time, i.e. a crash the moment a game negotiates TLS).
+                if (name == "h2")
+                {
+                    list.Add(SslApplicationProtocol.Http2);
+                }
+                else if (name == "http/1.1")
+                {
+                    list.Add(SslApplicationProtocol.Http11);
+                }
+            }
+
+            return list;
+        }
+
+        public ResultCode Handshake(string hostName, byte[] alpnWire = null)
         {
             StartSslOperation();
             // [Nextendo] Accept ANY server certificate so the emulated game can
@@ -145,29 +186,53 @@ namespace Ryujinx.HLE.HOS.Services.Ssl.SslService
             _stream = new SslStream(new NetworkStream(((DefaultSocket)((ManagedSocket)Socket).Socket).BaseSocket, false), false, certCallback, null);
             string origHost = hostName;
             hostName = RetrieveHostName(hostName);
-            Logger.Info?.Print(LogClass.ServiceSsl, $"[DIAG] nn::ssl Handshake remote={Socket.RemoteEndPoint} hostIn='{origHost}' hostUsed='{hostName}'");
 
-            // [Nextendo] ALPN policy. We used to advertise BOTH h2 and http/1.1 (h2 first)
-            // so HTTP/2 backends would negotiate HTTP/2. But NEX (MK8/Splatoon 2) is PRUDP
-            // over WebSocket, which REQUIRES the HTTP/1.1 Upgrade handshake: when a Go server offered h2
-            // in its ALPN list it selected h2 (server-side preference wins), the WS upgrade could not
-            // happen, and the console never reached the online hall (regression, 2026-07-11). NEX is
-            // the active target, so advertise ONLY http/1.1 so no server can
-            // ever pick h2. If an HTTP/2 backend is ever needed, re-add h2 SCOPED to those hosts only (e.g.
-            // by hostName), never globally.
+            // [Nextendo] ALPN policy. DEFAULT = http/1.1 ONLY: NEX (MK8/Splatoon 2) is PRUDP over
+            // WebSocket, which REQUIRES the HTTP/1.1 Upgrade handshake. When we advertised h2 globally,
+            // an HTTP/2-capable server selected h2 (server-side preference wins), the WS upgrade could
+            // never happen, and the console never reached the online hall (regression, 2026-07-11).
+            // So http/1.1 stays the default for everyone.
+            var appProtocols = new System.Collections.Generic.List<SslApplicationProtocol>
+            {
+                SslApplicationProtocol.Http11,
+            };
+
+            // [Nextendo] EXCEPTION, scoped by host: NPLN (Splatoon 3) is gRPC, which MANDATES HTTP/2.
+            // On those hosts we HONOR the ALPN list the game itself requested through SetNextAlpnProto
+            // (h2) instead of forcing http/1.1. Without it the front end reads our HTTP/2 preface as an
+            // HTTP/1.1 request and answers 404.
+            //
+            // The match is a substring, on purpose, because the NPLN *session* transport is a second
+            // gRPC endpoint that does NOT carry an "npln" host: after matchmaking the game connects
+            // straight to the session address with SNI "gs.nintendo.net". That one fell outside an
+            // exact-host test, so it got http/1.1 and the gRPC server never saw a single RPC. Symptom,
+            // measured: the TLS handshake completed (certificate and Finished exchanged) then nothing
+            // moved, the game rebuilt the connection every ~3 s, the private match died on
+            // KeepUserSession (2321-4992) and the session server's log stayed completely empty.
+            //
+            // Scoped by host so NEX is never affected.
+            bool isNplnHost = origHost != null &&
+                (origHost.Contains("npln", StringComparison.OrdinalIgnoreCase) ||
+                 origHost.Contains("gs.nintendo.net", StringComparison.OrdinalIgnoreCase));
+
+            if (isNplnHost)
+            {
+                var requested = ParseAlpnWire(alpnWire);
+                if (requested.Count > 0)
+                {
+                    appProtocols = requested;
+                }
+            }
+
             var sslOptions = new System.Net.Security.SslClientAuthenticationOptions
             {
                 TargetHost = hostName,
                 EnabledSslProtocols = TranslateSslVersion(_sslVersion),
                 CertificateRevocationCheckMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck,
                 RemoteCertificateValidationCallback = certCallback,
-                ApplicationProtocols = new System.Collections.Generic.List<System.Net.Security.SslApplicationProtocol>
-                {
-                    System.Net.Security.SslApplicationProtocol.Http11,
-                },
+                ApplicationProtocols = appProtocols,
             };
             _stream.AuthenticateAsClient(sslOptions);
-            Logger.Info?.Print(LogClass.ServiceSsl, $"[DIAG] nn::ssl ALPN négocié = '{_stream.NegotiatedApplicationProtocol}'");
             EndSslOperation();
 
             return ResultCode.Success;

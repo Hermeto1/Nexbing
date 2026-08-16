@@ -9,7 +9,7 @@ namespace Ryujinx.HLE.HOS.Services.Ssl.SslService
 
         ISocket Socket { get; }
 
-        ResultCode Handshake(string hostName);
+        ResultCode Handshake(string hostName, byte[] alpnWire = null);
 
         ResultCode GetServerCertificate(string hostname, Span<byte> certificates, out uint storageSize, out uint certificateCount);
 

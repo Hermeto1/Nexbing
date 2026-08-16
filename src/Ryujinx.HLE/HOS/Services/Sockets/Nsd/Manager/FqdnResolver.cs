@@ -77,9 +77,16 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Nsd.Manager
 
             context.Memory.Read(inputPosition, addressBuffer);
 
+            // Le tampon FQDN invite peut contenir des donnees APRES le NUL terminal du nom d'hote.
+            // Un TrimEnd ne retire que les NUL de fin, ce residu restait donc colle a la chaine et la
+            // recherche echouait ; on coupe au premier NUL, comme se lit une chaine C.
             string address = Encoding.UTF8.GetString(addressBuffer);
-            int nullIdx = address.IndexOf('\0');
-            if (nullIdx >= 0) address = address.Substring(0, nullIdx);
+            int nullIndex = address.IndexOf('\0');
+
+            if (nullIndex >= 0)
+            {
+                address = address[..nullIndex];
+            }
 
             resultCode = Resolve(address, out resolvedAddress);
 

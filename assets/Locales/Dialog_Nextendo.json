@@ -6249,6 +6249,56 @@
         "tr_TR": "GameBanana'da aç",
         "uk_UA": "Відкрити на GameBanana"
       }
+    },
+    {
+      "ID": "ModsBlockedTitle",
+      "Translations": {
+        "ar_SA": "",
+        "de_DE": "Mods sind für Splatoon 3 deaktiviert",
+        "el_GR": "",
+        "en_US": "Mods are disabled for Splatoon 3",
+        "es_ES": "Los mods están desactivados en Splatoon 3",
+        "fr_FR": "Les mods sont désactivés pour Splatoon 3",
+        "he_IL": "",
+        "it_IT": "Le mod sono disattivate per Splatoon 3",
+        "ja_JP": "",
+        "ko_KR": "",
+        "no_NO": "",
+        "pl_PL": "",
+        "pt_BR": "Os mods estão desativados para Splatoon 3",
+        "ru_RU": "",
+        "sv_SE": "",
+        "th_TH": "",
+        "tr_TR": "",
+        "uk_UA": "",
+        "zh_CN": "",
+        "zh_TW": ""
+      }
+    },
+    {
+      "ID": "ModsBlockedMessage",
+      "Translations": {
+        "ar_SA": "",
+        "de_DE": "",
+        "el_GR": "",
+        "en_US": "Splatoon 3 is played online against real people on the Nextendo servers, so mods are not allowed for this game — a single gameplay mod would ruin the match for everyone else, and the server cannot detect it.\n\nThe following mods were found and will be IGNORED:\n{0}\n\nThe game will start normally, without them. Every other game keeps its mods.",
+        "es_ES": "",
+        "fr_FR": "Splatoon 3 se joue en ligne contre de vraies personnes sur les serveurs Nextendo. Les mods y sont donc interdits : un seul mod de jeu gâcherait la partie de tous les autres, et le serveur ne peut pas le détecter.\n\nLes mods suivants ont été trouvés et seront IGNORÉS :\n{0}\n\nLe jeu va démarrer normalement, sans eux. Tous les autres jeux conservent leurs mods.",
+        "he_IL": "",
+        "it_IT": "",
+        "ja_JP": "",
+        "ko_KR": "",
+        "no_NO": "",
+        "pl_PL": "",
+        "pt_BR": "",
+        "ru_RU": "",
+        "sv_SE": "",
+        "th_TH": "",
+        "tr_TR": "",
+        "uk_UA": "",
+        "zh_CN": "",
+        "zh_TW": ""
+      }
     }
   ]
 }

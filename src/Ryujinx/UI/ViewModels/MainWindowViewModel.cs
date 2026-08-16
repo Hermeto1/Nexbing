@@ -1915,6 +1915,30 @@ namespace Ryujinx.Ava.UI.ViewModels
                 return;
             }
 
+            // [Nextendo] Splatoon 3 : prevenir AVANT le lancement que les mods installes seront
+            // ignores.
+            //
+            // Sans ce message, un joueur qui a pose un mod le verrait simplement ne rien faire et
+            // conclurait a un bug de l'emulateur. On le dit donc explicitement, on nomme les mods
+            // concernes, et on precise que le jeu demarre quand meme — l'interdiction ne bloque pas
+            // la partie, elle neutralise le mod. Voir ModLoader.ModsInterdits.
+            if (Ryujinx.HLE.HOS.ModLoader.ModsInterdits(application.Id))
+            {
+                List<string> modsIgnores = Ryujinx.HLE.HOS.ModLoader.ModsInstallesPour(application.Id);
+
+                if (modsIgnores.Count > 0)
+                {
+                    await ContentDialogHelper.CreateInfoDialog(
+                        LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ModsBlockedTitle],
+                        LocaleManager.GetFormatted(
+                            LocaleKeys.Dialog_Nextendo_ModsBlockedMessage,
+                            string.Join("\n", modsIgnores.Select(m => "• " + m))),
+                        LocaleManager.Instance[LocaleKeys.InputDialogOk],
+                        string.Empty,
+                        "Nextendo Network");
+                }
+            }
+
             // [Nextendo] Pre-launch online gate. Online presents the anonymous NEX id
             // (NetworkServiceAccountId => 0xcafe, which the gated server refuses) — i.e. online
             // is BLOCKED, not just warned — when ANY of these hold:

@@ -2,6 +2,7 @@ using Ryujinx.Common.Logging;
 using Ryujinx.HLE.HOS.Services.Sockets.Bsd.Proxy;
 using Ryujinx.HLE.HOS.Services.Sockets.Bsd.Types;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -28,6 +29,21 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
         public IPEndPoint LocalEndPoint => Socket.LocalEndPoint as IPEndPoint;
 
         public ISocketImpl Socket { get; private set; }
+
+        // [Nextendo] Le raccrochage du pair a-t-il deja ete signale a l'invite par un POLLHUP synthetise ?
+        // Voir ManagedSocketPollManager.Poll : la notification est volontairement A FRONT et non a niveau.
+        // POSIX rapporte POLLHUP a chaque appel, mais l'invite peut garder longtemps un descripteur mort dans
+        // son ensemble de sondage sans interet en lecture (mesure : 39 s avec req=0) ; un POLLHUP a niveau
+        // ferait alors rendre chaque poll instantanement, donc une boucle folle. On previent une fois, ce qui
+        // suffit a rompre la cecite, sans risquer la boucle si l'invite ignore l'avertissement.
+        public bool HangupReported { get; set; }
+
+        // [Nextendo] getsockopt doit rendre ce que setsockopt a accepte. Quand SetSocketOption feint le succes
+        // sur une option que cette emulation ne sait pas traduire (voir les branches tolerantes plus bas), on
+        // retient la valeur ici pour que GetSocketOption la rende au lieu d'un EOPNOTSUPP. grpc-core pose
+        // TCP_NODELAY / SO_REUSEADDR et les relit aussitot : un « set OK / get erreur » le faisait fermer le
+        // socket avant meme le connect, donc avant le moindre echange.
+        private readonly Dictionary<(BsdSocketOption Option, SocketOptionLevel Level), byte[]> _feignedSockOpts = new();
 
         public ManagedSocket(AddressFamily addressFamily, SocketType socketType, ProtocolType protocolType, string lanInterfaceId)
         {
@@ -153,6 +169,45 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
 
         public LinuxError Connect(IPEndPoint remoteEndPoint)
         {
+            // [Nextendo] Le resolveur gRPC de certains clients en ligne desassemble mal l'addrinfo qu'on lui
+            // rend et tend au socket 0.0.0.0 / :: — l'adresse est perdue, le port survit. Le connect echoue
+            // alors sans qu'aucun ClientHello ne parte. On substitue la redirection DNS notee POUR CE PORT,
+            // afin que la connexion atteigne le service reellement vise. Le HTTP passe par GetHostByName (un
+            // autre chemin) et n'est jamais a 0.0.0.0 : seul le connect gRPC casse est rattrape ici. Socket
+            // IPv6 a double pile -> l'adresse IPv4 est mappee en ::ffff:.
+            bool grpcConnect = false;
+            {
+                IPAddress a = remoteEndPoint.Address;
+                bool isAny = a.Equals(IPAddress.Any) || a.Equals(IPAddress.IPv6Any)
+                             || (a.IsIPv4MappedToIPv6 && a.MapToIPv4().Equals(IPAddress.Any));
+                // Repli choisi PAR PORT : le port designe le service vise sans ambiguite. En prenant « la
+                // derniere resolution », toutes destinations confondues, une connexion pouvait partir vers le
+                // serveur d'un autre jeu — mesure du 2026-08-15, douze fois sur vingt-deux chez un testeur,
+                // ce qui rendait la jonction en partie privee aleatoire.
+                IPAddress sub = Ryujinx.HLE.HOS.Services.Sockets.Sfdnsres.Proxy.DnsMitmResolver.RedirectionPour(remoteEndPoint.Port);
+                if (isAny && sub != null)
+                {
+                    if (Socket.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+                        && sub.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    {
+                        sub = sub.MapToIPv6();
+                    }
+
+                    Logger.Info?.PrintMsg(LogClass.ServiceBsd, $"[Nextendo] Connect target was {a}:{remoteEndPoint.Port} (lost address) -> substituting the redirect noted for this port");
+                    remoteEndPoint = new IPEndPoint(sub, remoteEndPoint.Port);
+                    grpcConnect = true;
+                }
+                else if (isAny)
+                {
+                    // Adresse perdue sur un port SANS redirection connue : typiquement un pair du jeu en
+                    // ligne. On ne substitue rien — envoyer ce trafic ailleurs casserait le pair-a-pair — mais
+                    // on le trace, parce que c'est exactement la mesure qui manquera pour comprendre un echec
+                    // d'etablissement P2P.
+                    Logger.Debug?.PrintMsg(LogClass.ServiceBsd,
+                        $"[Nextendo] Connect target was {a}:{remoteEndPoint.Port} (lost address) — aucune redirection pour ce port, on ne substitue pas (pair ?)");
+                }
+            }
+
             bool isLDNPrivateIP = remoteEndPoint.Address.ToString().StartsWith("192.168.");
             if (isLDNPrivateIP)
             {
@@ -173,6 +228,35 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
             {
                 if (!Blocking && exception.ErrorCode == (int)WsaError.WSAEWOULDBLOCK)
                 {
+                    // [Nextendo] Pour le connect gRPC, ne PAS rendre EINPROGRESS en comptant sur le client
+                    // pour sonder le socket en POLLOUT : c'est RACE. Il n'ajoute le socket a son ensemble de
+                    // sondage que tardivement, si bien que l'achevement etait detecte jusqu'a ~74 s plus tard
+                    // et que tout le parcours en ligne calait sur certaines executions. Cote hote le connect
+                    // aboutit en une dizaine de millisecondes : on bloque donc brievement ici et on rend
+                    // SUCCESS des que le socket est inscriptible (donc connecte). Le client repart aussitot
+                    // sur TLS/gRPC — deterministe. Limite aux connexions gRPC (celles dont l'adresse a ete
+                    // substituee) ; les autres sockets gardent l'EINPROGRESS non bloquant d'origine.
+                    // Les deux branches ont ete comparees, le correctif de revents en place :
+                    //   SUCCESS ici  -> le client prend sa branche « deja connecte » et la poignee de main TLS
+                    //                   part vraiment.
+                    //   EINPROGRESS  -> il enregistre bien le socket (94 728 sondages, rev=Output) mais
+                    //                   n'execute jamais son on_writable : il n'emet STRICTEMENT RIEN.
+                    // NEXTENDO_GRPC_CONNECT_SYNC=0 permet de retenter la voie asynchrone.
+                    if (grpcConnect && Environment.GetEnvironmentVariable("NEXTENDO_GRPC_CONNECT_SYNC") != "0")
+                    {
+                        try
+                        {
+                            if (Socket.Poll(2_000_000, SelectMode.SelectWrite)
+                                && !Socket.Poll(0, SelectMode.SelectError))
+                            {
+                                Logger.Info?.PrintMsg(LogClass.ServiceBsd, "[Nextendo] grpc connect completed synchronously (blocked for host completion) -> SUCCESS");
+
+                                return LinuxError.SUCCESS;
+                            }
+                        }
+                        catch { /* on retombe sur EINPROGRESS */ }
+                    }
+
                     return LinuxError.EINPROGRESS;
                 }
                 else
@@ -449,6 +533,18 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
             }
         }
 
+        // [Nextendo] Remplit optionValue avec la valeur qu'un setsockopt precedent a feint d'accepter (ou des
+        // zeros), pour que getsockopt rende ce que le client a pose au lieu d'echouer.
+        private void ReturnFeignedSockOpt(BsdSocketOption option, SocketOptionLevel level, Span<byte> optionValue)
+        {
+            optionValue.Clear();
+
+            if (_feignedSockOpts.TryGetValue((option, level), out byte[] stored))
+            {
+                stored.AsSpan(0, Math.Min(stored.Length, optionValue.Length)).CopyTo(optionValue);
+            }
+        }
+
         public LinuxError GetSocketOption(BsdSocketOption option, SocketOptionLevel level, Span<byte> optionValue)
         {
             try
@@ -457,17 +553,20 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
 
                 if (result != LinuxError.SUCCESS)
                 {
-                    Logger.Warning?.Print(LogClass.ServiceBsd, $"Invalid GetSockOpt Option: {option} Level: {level}");
+                    // [Nextendo] Tolerant, en miroir de SetSocketOption : rendre la valeur posee par le client
+                    // (ou zero) avec SUCCESS. Un « set OK / get erreur » faisait fermer le socket avant connect.
+                    Logger.Warning?.Print(LogClass.ServiceBsd, $"GetSockOpt Option toléré (option non validée): {option} Level: {level}");
+                    ReturnFeignedSockOpt(option, level, optionValue);
 
-                    return result;
+                    return LinuxError.SUCCESS;
                 }
 
                 if (!WinSockHelper.TryConvertSocketOption(option, level, out SocketOptionName optionName))
                 {
-                    Logger.Warning?.Print(LogClass.ServiceBsd, $"Unsupported GetSockOpt Option: {option} Level: {level}");
-                    optionValue.Clear();
+                    Logger.Warning?.Print(LogClass.ServiceBsd, $"GetSockOpt Option toléré (non convertible): {option} Level: {level}");
+                    ReturnFeignedSockOpt(option, level, optionValue);
 
-                    return LinuxError.EOPNOTSUPP;
+                    return LinuxError.SUCCESS;
                 }
 
                 byte[] tempOptionValue = new byte[optionValue.Length];
@@ -502,6 +601,7 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
                     // faisait échouer l'ouverture de la socket (ENOPROTOOPT) → chargement infini.
                     // On feint le succès : l'option n'est pas critique, le client poursuit et connecte.
                     Logger.Warning?.Print(LogClass.ServiceBsd, $"SetSockOpt Option toléré (option non validée): {option} Level: {level}");
+                    _feignedSockOpts[(option, level)] = optionValue.ToArray();
 
                     return LinuxError.SUCCESS;
                 }
@@ -510,6 +610,7 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
                 {
                     // [Nextendo] idem : option non convertible → succès feint plutôt qu'échec.
                     Logger.Warning?.Print(LogClass.ServiceBsd, $"SetSockOpt Option toléré (non convertible): {option} Level: {level}");
+                    _feignedSockOpts[(option, level)] = optionValue.ToArray();
 
                     return LinuxError.SUCCESS;
                 }

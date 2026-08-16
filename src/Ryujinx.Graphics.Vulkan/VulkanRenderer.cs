@@ -1034,41 +1034,67 @@ namespace Ryujinx.Graphics.Vulkan
                 return;
             }
 
-            CommandBufferPool.Dispose();
-            BackgroundResources.Dispose();
-            _counters.Dispose();
-            _window.Dispose();
-            HelperShader.Dispose();
-            _pipeline.Dispose();
-            BufferManager.Dispose();
-            PipelineLayoutCache.Dispose();
-            Barriers.Dispose();
-
-            MemoryAllocator.Dispose();
-
-            foreach (ShaderCollection shader in Shaders)
+            // [Nextendo] Une extinction ne doit JAMAIS emporter l'application.
+            //
+            // Symptome observe : apres un arret anormal de l'invite (un jeu qui s'abat lui-meme sur
+            // une erreur fatale), cette liberation levait une NullReferenceException qui remontait
+            // jusqu'au gestionnaire global et tuait Ryujinx — le joueur voyait « l'emulateur a
+            // crash » alors que l'emulation etait deja terminee et qu'il aurait suffi de revenir au
+            // menu. Le drapeau _initialized ne protege pas des objets partiellement construits.
+            // On libere donc au mieux, et on journalise ce qui echoue au lieu de l'escalader.
+            static void Liberer(string quoi, Action action)
             {
-                shader.Dispose();
+                try
+                {
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning?.Print(LogClass.Gpu, $"[Nextendo] liberation Vulkan « {quoi} » ignoree : {ex.GetType().Name}");
+                }
             }
 
-            foreach (ITexture texture in Textures)
+            Liberer(nameof(CommandBufferPool), () => CommandBufferPool?.Dispose());
+            Liberer(nameof(BackgroundResources), () => BackgroundResources?.Dispose());
+            Liberer("counters", () => _counters?.Dispose());
+            Liberer("window", () => _window?.Dispose());
+            Liberer(nameof(HelperShader), () => HelperShader?.Dispose());
+            Liberer("pipeline", () => _pipeline?.Dispose());
+            Liberer(nameof(BufferManager), () => BufferManager?.Dispose());
+            Liberer(nameof(PipelineLayoutCache), () => PipelineLayoutCache?.Dispose());
+            Liberer(nameof(Barriers), () => Barriers?.Dispose());
+            Liberer(nameof(MemoryAllocator), () => MemoryAllocator?.Dispose());
+
+            Liberer("shaders", () =>
             {
-                texture.Release();
-            }
+                foreach (ShaderCollection shader in Shaders)
+                {
+                    shader?.Dispose();
+                }
+            });
 
-            foreach (SamplerHolder sampler in Samplers)
+            Liberer("textures", () =>
             {
-                sampler.Dispose();
-            }
+                foreach (ITexture texture in Textures)
+                {
+                    texture?.Release();
+                }
+            });
 
-            SurfaceApi.DestroySurface(_instance.Instance, _surface, null);
+            Liberer("samplers", () =>
+            {
+                foreach (SamplerHolder sampler in Samplers)
+                {
+                    sampler?.Dispose();
+                }
+            });
 
-            Api.DestroyDevice(_device, null);
-
-            _debugMessenger.Dispose();
+            Liberer("surface", () => SurfaceApi.DestroySurface(_instance.Instance, _surface, null));
+            Liberer("device", () => Api.DestroyDevice(_device, null));
+            Liberer("debugMessenger", () => _debugMessenger.Dispose());
 
             // Last step destroy the instance
-            _instance.Dispose();
+            Liberer("instance", () => _instance.Dispose());
         }
 
         public bool PrepareHostMapping(nint address, ulong size)

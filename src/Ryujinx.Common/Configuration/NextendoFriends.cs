@@ -19,16 +19,27 @@ namespace Ryujinx.Common.Configuration
         {
             public readonly ulong Pid;
             public readonly string Name;
+            // The friend's NSA id (nn::friends NetworkServiceAccountId). Splatoon 3 gets its friend
+            // list from NPLN, which names each friend by nsa_id, then asks the console's LOCAL
+            // friend: service for their details BY THAT SAME nsa_id. Keyed only by Pid we could
+            // resolve none of them, and the in-game "Amis" screen stayed empty.
+            public readonly ulong Nsa;
+            // Statut de presence rapporte par le serveur de comptes (0 = hors ligne). Sans lui on
+            // annoncait TOUS les amis « en train de jouer », ce qui est faux et pousse le jeu a
+            // proposer de rejoindre des parties qui n'existent pas.
+            public readonly int Status;
             // The friend's live S2 presence "AppField" (nn::friends AppKeyValueStorage, up to
             // 0xC0 bytes) relayed by the account server — encodes SessionId/Full/etc. so S2 sees
             // the friend as in a JOINABLE private battle. Empty when the friend isn't in a room.
             public readonly byte[] AppField;
 
-            public Entry(ulong pid, string name, byte[] appField)
+            public Entry(ulong pid, string name, byte[] appField, ulong nsa = 0, int status = 0)
             {
                 Pid = pid;
                 Name = name;
                 AppField = appField;
+                Nsa = nsa;
+                Status = status;
             }
         }
 
@@ -36,6 +47,38 @@ namespace Ryujinx.Common.Configuration
         private static List<Entry> _cache = new();
         private static long _lastFetchMs;
         private static int _refreshing;
+
+        /// <summary>
+        /// [Nextendo] Liste d'amis GARANTIE chaude, avec attente BORNEE.
+        ///
+        /// Get() ne bloque jamais et remplit en tache de fond — indispensable pour les jeux NEX, qui
+        /// interrogent en boucle depuis le fil online : un blocage la-bas coupe les acquittements
+        /// PRUDP et le serveur declare l'erreur de communication. Mais Splatoon 3, lui, demande sa
+        /// liste UNE SEULE FOIS, tot (mesure : a 39 s de boot, cache encore vide) et repart avec
+        /// zero ami sans jamais redemander. Pour ce cas precis on accepte une attente COURTE et
+        /// plafonnee, jamais sur le chemin des jeux NEX.
+        /// </summary>
+        public static IReadOnlyList<Entry> GetWarm(int timeoutMs)
+        {
+            IReadOnlyList<Entry> list = Get(); // declenche le rafraichissement de fond si besoin
+            if (list.Count > 0 || !NextendoAccount.IsLinked)
+            {
+                return list;
+            }
+
+            long deadline = Environment.TickCount64 + timeoutMs;
+            while (Environment.TickCount64 < deadline)
+            {
+                System.Threading.Thread.Sleep(50);
+                list = Get();
+                if (list.Count > 0)
+                {
+                    break;
+                }
+            }
+
+            return list;
+        }
 
         public static IReadOnlyList<Entry> Get()
         {
@@ -71,6 +114,103 @@ namespace Ryujinx.Common.Configuration
             }
         }
 
+        // [Nextendo] Photos de profil des amis, servies au service friend: LOCAL de la console
+        // (GetFriendProfileImage, cmd 10110). Elles ne viennent pas de la liste d'amis — celle-ci ne
+        // porte qu'une URL — mais de /api/avatar?pid=<pid>, qui rend un JPEG. On les recupere donc a
+        // la demande, une seule fois par ami, et on garde le resultat (y compris l'echec, en tableau
+        // vide) pour ne jamais re-solliciter le serveur sur le fil d'appel du jeu.
+        private static readonly object _imgLock = new();
+        private static readonly Dictionary<ulong, byte[]> _images = new();
+        private static readonly HashSet<ulong> _imgFetching = new();
+
+        /// <summary>
+        /// Photo de profil d'un ami (JPEG), ou null tant qu'elle n'est pas arrivee. Ne bloque
+        /// jamais : la recuperation part en tache de fond, comme la liste d'amis.
+        /// </summary>
+        public static byte[] ProfileImage(ulong pid)
+        {
+            if (pid == 0)
+            {
+                return null;
+            }
+
+            lock (_imgLock)
+            {
+                if (_images.TryGetValue(pid, out byte[] cached))
+                {
+                    return cached.Length > 0 ? cached : null;
+                }
+
+                if (!_imgFetching.Add(pid))
+                {
+                    return null; // deja en cours
+                }
+            }
+
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                byte[] data = System.Array.Empty<byte>();
+                try
+                {
+                    string baseUrl = NextendoEndpoint.BaseUrl().TrimEnd('/');
+                    using HttpRequestMessage req = new(HttpMethod.Get, baseUrl + "/api/avatar?pid=" + pid);
+                    using HttpResponseMessage resp = _http.SendAsync(req).GetAwaiter().GetResult();
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        byte[] body = resp.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+                        // La console attend un JPEG : on ne sert que ce qui en est un (SOI ff d8).
+                        if (body.Length > 2 && body[0] == 0xFF && body[1] == 0xD8)
+                        {
+                            data = body;
+                        }
+                    }
+                }
+                catch
+                {
+                    // reseau indisponible : on retient l'echec (tableau vide) plutot que de boucler
+                }
+
+                lock (_imgLock)
+                {
+                    _images[pid] = data;
+                    _imgFetching.Remove(pid);
+                }
+            });
+
+            return null;
+        }
+
+        /// <summary>Photo de profil avec attente BORNEE — meme raison que GetWarm.</summary>
+        public static byte[] ProfileImageWarm(ulong pid, int timeoutMs)
+        {
+            byte[] img = ProfileImage(pid);
+            if (img != null)
+            {
+                return img;
+            }
+
+            long deadline = Environment.TickCount64 + timeoutMs;
+            while (Environment.TickCount64 < deadline)
+            {
+                System.Threading.Thread.Sleep(50);
+                img = ProfileImage(pid);
+                if (img != null)
+                {
+                    return img;
+                }
+
+                lock (_imgLock)
+                {
+                    if (_images.ContainsKey(pid))
+                    {
+                        return null; // resolu en echec, inutile d'attendre plus
+                    }
+                }
+            }
+
+            return null;
+        }
+
         private static void Refresh()
         {
             try
@@ -98,18 +238,33 @@ namespace Ryujinx.Common.Configuration
                         ulong pid = f.TryGetProperty("pid", out JsonElement p) ? p.GetUInt64() : 0;
                         string name = f.TryGetProperty("name", out JsonElement n) ? (n.GetString() ?? "") : "";
                         byte[] appField = null;
-                        if (f.TryGetProperty("presence", out JsonElement pres) && pres.ValueKind == JsonValueKind.Object
-                            && pres.TryGetProperty("app_field", out JsonElement af) && af.ValueKind == JsonValueKind.String)
+                        int status = 0;
+                        if (f.TryGetProperty("presence", out JsonElement pres) && pres.ValueKind == JsonValueKind.Object)
                         {
-                            string b64 = af.GetString();
-                            if (!string.IsNullOrEmpty(b64))
+                            if (pres.TryGetProperty("status", out JsonElement st) && st.ValueKind == JsonValueKind.Number)
                             {
-                                try { appField = Convert.FromBase64String(b64); } catch { appField = null; }
+                                status = st.GetInt32();
                             }
+                            if (pres.TryGetProperty("app_field", out JsonElement af) && af.ValueKind == JsonValueKind.String)
+                            {
+                                string b64 = af.GetString();
+                                if (!string.IsNullOrEmpty(b64))
+                                {
+                                    try { appField = Convert.FromBase64String(b64); } catch { appField = null; }
+                                }
+                            }
+                        }
+                        // Le NSA arrive en hexadecimal (16 chiffres) : c'est l'identifiant sous lequel
+                        // NPLN nomme l'ami, donc celui que Splatoon 3 redemandera au service friend:.
+                        ulong nsa = 0;
+                        if (f.TryGetProperty("nsa", out JsonElement nsaEl) && nsaEl.ValueKind == JsonValueKind.String)
+                        {
+                            _ = ulong.TryParse(nsaEl.GetString(), System.Globalization.NumberStyles.HexNumber,
+                                System.Globalization.CultureInfo.InvariantCulture, out nsa);
                         }
                         if (pid != 0)
                         {
-                            list.Add(new Entry(pid, name, appField));
+                            list.Add(new Entry(pid, name, appField, nsa, status));
                         }
                     }
                 }

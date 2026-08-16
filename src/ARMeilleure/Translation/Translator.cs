@@ -243,8 +243,17 @@ namespace ARMeilleure.Translation
             }
         }
 
+        // [Nextendo] Battement global d'activite du JIT, incremente a chaque traduction de fonction
+        // (premier plan, rejit d'arriere-plan et PPTC). La retenue de la premiere resolution NPLN
+        // (DnsMitmResolver.MaybeDelayNplnInit) le sonde pour attendre que la rafale de compilation du
+        // demarrage RETOMBE vraiment — adaptatif, plutot qu'une pause de duree fixe — afin que la mise en
+        // place de la connexion gRPC ne parte pas au milieu de la contention.
+        public static long JitActivityCounter;
+
         internal TranslatedFunction Translate(ulong address, ExecutionMode mode, bool highCq, bool singleStep = false, bool pptcTranslation = false)
         {
+            System.Threading.Interlocked.Increment(ref JitActivityCounter);
+
             ArmEmitterContext context = new(
                 Memory,
                 CountTable,

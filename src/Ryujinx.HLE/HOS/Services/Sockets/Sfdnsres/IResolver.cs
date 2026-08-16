@@ -651,6 +651,12 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Sfdnsres
                 AddrInfoSerialized info = new(header, addr, null, hostEntry.HostName);
 
                 data = info.Write(data);
+
+                // [Nextendo] Retenir cette redirection POUR CE PORT : c'est elle que le repli de
+                // ManagedSocket.Connect utilisera si le client perd l'adresse en desassemblant l'addrinfo.
+                // Sans cette cle, le repli piochait la derniere resolution tous services confondus et
+                // envoyait une connexion sur deux vers le serveur d'un autre jeu.
+                DnsMitmResolver.NoterRedirection(port, ip);
             }
 
             uint sentinel = 0;

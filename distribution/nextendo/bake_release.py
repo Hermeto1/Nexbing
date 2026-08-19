@@ -19,15 +19,26 @@ nncs2 = os.environ.get("NEXTENDO_NNCS2_IP", nat).strip()
 version = sys.argv[1]
 git_hash = sys.argv[2][:7]
 
+# Two-phase on purpose: EVERY pattern is checked before ANY file is written.
+# A partial bake used to be possible -- one file rewritten, the next pattern missing, the run
+# aborted -- and the resulting tree still builds: ReleaseInformation keeps its %% placeholders,
+# so IsValid is false and the version/update gates are silently inactive in a shipped build.
+# Better to touch nothing at all than to leave that behind.
+_pending = []
+
 def patch(rel, old, new):
     with io.open(rel, encoding="utf-8") as f:
         s = f.read()
     n = s.count(old)
     if n != 1:
         raise SystemExit(f"BAKE FAIL {rel}: expected exactly 1 match, found {n}")
-    with io.open(rel, "w", encoding="utf-8", newline="") as f:
-        f.write(s.replace(old, new))
-    print(f"  baked {rel}")
+    _pending.append((rel, s.replace(old, new)))
+
+def commit():
+    for rel, s in _pending:
+        with io.open(rel, "w", encoding="utf-8", newline="") as f:
+            f.write(s)
+        print(f"  baked {rel}")
 
 # 1) DnsMitmResolver: real server IPs instead of the loopback fallback
 patch("src/Ryujinx.HLE/HOS/Services/Sockets/Sfdnsres/Proxy/DnsMitmResolver.cs",
@@ -53,16 +64,16 @@ f"""            string value = Environment.GetEnvironmentVariable(envVar);
 # 2) NextendoNetworkCheck: real nncs responders, DECOUPLED from the backend IP (bakes their own
 #    fallback so a build whose backend points at nx1 still probes the two real NAT responders)
 patch("src/Ryujinx/Common/NextendoNetworkCheck.cs",
-'''        private static readonly string Nncs1 =
+'''        private static readonly string Nncs1Configure =
             Environment.GetEnvironmentVariable("NEXTENDO_NNCS1_IP")
             ?? Environment.GetEnvironmentVariable("NEXTENDO_SERVER_IP") ?? "127.0.0.1";
-        private static readonly string Nncs2 =
+        private static readonly string Nncs2Configure =
             Environment.GetEnvironmentVariable("NEXTENDO_NNCS2_IP")
             ?? Environment.GetEnvironmentVariable("NEXTENDO_NAT_IP") ?? "127.0.0.1";''',
-f'''        private static readonly string Nncs1 =
+f'''        private static readonly string Nncs1Configure =
             Environment.GetEnvironmentVariable("NEXTENDO_NNCS1_IP")
             ?? Environment.GetEnvironmentVariable("NEXTENDO_SERVER_IP") ?? "{nncs1}";
-        private static readonly string Nncs2 =
+        private static readonly string Nncs2Configure =
             Environment.GetEnvironmentVariable("NEXTENDO_NNCS2_IP")
             ?? Environment.GetEnvironmentVariable("NEXTENDO_NAT_IP") ?? "{nncs2}";''')
 
@@ -77,4 +88,5 @@ f'''        private const string BuildVersion = "{version}";
         private const string ReleaseChannelName = "release";
         private const string ConfigFileName = "Config.json";''')
 
+commit()
 print("BAKE OK")

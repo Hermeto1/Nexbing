@@ -52,6 +52,9 @@ namespace Ryujinx.Ava.UI.Views.Main
             XCITrimmerMenuItem.Command = Commands.Create(XciTrimmerView.Show);
             NextendoLoginMenuItem.Command = Commands.Create(OpenNextendoAccount);
             NextendoFriendsMenuItem.Command = Commands.Create(NextendoFriendsWindow.Open);
+            // Deux entrees, une seule fenetre : elle s ouvre sur l onglet demande.
+            NextendoLobbyMenuItem.Command = Commands.Create(() => NextendoLobbyWindow.Open(0));
+            NextendoRecentMenuItem.Command = Commands.Create(() => NextendoLobbyWindow.Open(1));
             NextendoReportMenuItem.Command = Commands.Create(() => NextendoReportWindow.Open());
             AboutWindowMenuItem.Command = Commands.Create(AboutView.Show);
             CompatibilityListMenuItem.Command = Commands.Create(() => CompatibilityListWindow.Show());

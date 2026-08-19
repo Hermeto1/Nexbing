@@ -15,10 +15,28 @@ namespace Ryujinx.Common.Configuration
         private static readonly object _lock = new();
         private static bool _loaded;
 
-        public static ulong Pid { get; private set; }
+        // ⚠️ Le PID et le jeton NEX sont stockes ici a l etat BRUT, et lus par les
+        // proprietes publiques ci-dessous, qui les taisent en mode « serveur
+        // personnalise ». La persistance ecrit les champs bruts, jamais les proprietes :
+        // sinon enregistrer pendant ce mode effacerait le compte du disque.
+        private static ulong _pid;
+        private static string _nexToken = "";
+
+        /// <summary>Numero de compte Nextendo. Zero quand aucun compte n est utilisable,
+        /// y compris parce que le mode « serveur personnalise » est actif.</summary>
+        public static ulong Pid => NextendoServerOverride.HorsNextendo ? 0 : _pid;
+
         public static string Username { get; private set; } = "";
         public static string FriendCode { get; private set; } = "";
-        public static string NexToken { get; private set; } = "";
+
+        /// <summary>
+        /// Le jeton signe qui prouve l identite du compte.
+        ///
+        /// ⚠️ IL NE DOIT JAMAIS SORTIR EN MODE « SERVEUR PERSONNALISE ». Le jeu le
+        /// recopie dans le login NEX (claim « nnex ») : sans cette garde, se connecter au
+        /// serveur d un inconnu lui livrerait un jeton signe valable sur NOS serveurs.
+        /// </summary>
+        public static string NexToken => NextendoServerOverride.HorsNextendo ? "" : _nexToken;
 
         private static bool _isGuest;
 
@@ -49,9 +67,29 @@ namespace Ryujinx.Common.Configuration
             get { EnsureLoaded(); return _miiData; }
         }
 
+        /// <summary>
+        /// Le compte est-il utilisable MAINTENANT ?
+        ///
+        /// ⚠️ Le mode « serveur personnalisé » rend ceci faux sans effacer quoi que ce soit :
+        /// le compte reste sur le disque et revient dès qu'on décoche la case. C'est ICI que
+        /// la coupure est faite, et pas dans chaque appelant, parce que tout ce qui touche à
+        /// Nextendo passe déjà par cette question — synchronisation des sauvegardes, amis,
+        /// présence, historique, identité NEX présentée au jeu. Une coupure éparpillée aurait
+        /// laissé passer celui qu'on aurait oublié.
+        /// </summary>
         public static bool IsLinked
         {
-            get { EnsureLoaded(); return Pid != 0; }
+            get
+            {
+                if (NextendoServerOverride.HorsNextendo)
+                {
+                    return false;
+                }
+
+                EnsureLoaded();
+
+                return _pid != 0;
+            }
         }
 
         /// <summary>Runtime-only (not persisted): set true at game launch when the running
@@ -93,10 +131,10 @@ namespace Ryujinx.Common.Configuration
 
                         switch (key)
                         {
-                            case "pid": ulong.TryParse(val, out ulong p); Pid = p; break;
+                            case "pid": ulong.TryParse(val, out ulong p); _pid = p; break;
                             case "username": Username = val; break;
                             case "friend_code": FriendCode = val; break;
-                            case "nex_token": NexToken = val; break;
+                            case "nex_token": _nexToken = val; break;
                             case "profile_user_id": _profileUserId = val; break;
                             case "mii_data": _miiData = val; break;
                             case "is_guest": _isGuest = val == "1" || val.Equals("true", StringComparison.OrdinalIgnoreCase); break;
@@ -106,7 +144,7 @@ namespace Ryujinx.Common.Configuration
                 catch
                 {
                     // Corrupt/unreadable file -> treat as not linked.
-                    Pid = 0;
+                    _pid = 0;
                 }
             }
         }
@@ -116,16 +154,19 @@ namespace Ryujinx.Common.Configuration
             lock (_lock)
             {
                 EnsureLoaded(); // preserve an existing profile binding for the same account
-                if (pid != Pid)
+                // Comparaison sur le champ BRUT : la propriete Pid rend 0 en mode « serveur
+                // personnalise », ce qui ferait croire a un changement de compte et delierait
+                // le profil local a tort.
+                if (pid != _pid)
                 {
                     // different account -> unbind the previous local profile + Mii
                     _profileUserId = "";
                     _miiData = "";
                 }
-                Pid = pid;
+                _pid = pid;
                 Username = username ?? "";
                 FriendCode = friendCode ?? "";
-                NexToken = nexToken ?? "";
+                _nexToken = nexToken ?? "";
                 _isGuest = isGuest;
                 _loaded = true;
                 WriteFileLocked();
@@ -158,8 +199,13 @@ namespace Ryujinx.Common.Configuration
         {
             try
             {
+                // ⚠️ Les champs BRUTS, jamais les propriétés. Pid et NexToken se taisent en mode
+                // « serveur personnalisé » : les écrire ici réécrirait le fichier avec pid=0 et un
+                // jeton vide, c'est-à-dire DÉTRUIRAIT le compte sur le disque — au premier
+                // SetProfileUserId ou SetMiiData venu, alors que l'utilisateur voulait seulement
+                // jouer ailleurs un moment.
                 File.WriteAllText(FilePath,
-                    $"pid={Pid}\nusername={Username}\nfriend_code={FriendCode}\nnex_token={NexToken}\nprofile_user_id={_profileUserId}\nmii_data={_miiData}\nis_guest={(_isGuest ? "1" : "0")}\n");
+                    $"pid={_pid}\nusername={Username}\nfriend_code={FriendCode}\nnex_token={_nexToken}\nprofile_user_id={_profileUserId}\nmii_data={_miiData}\nis_guest={(_isGuest ? "1" : "0")}\n");
             }
             catch
             {
@@ -171,10 +217,10 @@ namespace Ryujinx.Common.Configuration
         {
             lock (_lock)
             {
-                Pid = 0;
+                _pid = 0;
                 Username = "";
                 FriendCode = "";
-                NexToken = "";
+                _nexToken = "";
                 _profileUserId = "";
                 _miiData = "";
                 _isGuest = false;

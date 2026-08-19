@@ -2,6 +2,7 @@ using Gommon;
 using Humanizer;
 using MsgPack;
 using Ryujinx.Common;
+using Ryujinx.Common.Logging;
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
@@ -405,6 +406,18 @@ namespace Ryujinx.Ava.Systems.PlayReport
                 // Wireless/LAN Play
                 "Local-Single" => "Wireless/LAN Play",
                 "Local-2players" => "Wireless/LAN Play 2 Players",
+                // [Nextendo] Écrans en ligne, relevés sur un rapport RÉEL du 19/08/2026 :
+                //   {"To":"Wifi-Single","From":"TitleSelect"} puis
+                //   {"To":"Anybody-World","From":"Wifi"} puis {"To":"Race","From":"Anybody"}.
+                // Ils tombaient tous dans le cas par défaut, qui EFFAÇAIT la présence : entrer en
+                // ligne faisait donc disparaître l'information au lieu de l'enrichir.
+                "Wifi-Single" => "Online",
+                "Wifi-2players" => "Online: 2 Players",
+                "Anybody-World" => "Worldwide",
+                "Anybody-Area" => "Regional",
+                "Friends" => "Friends' rooms",
+                "Tournament" => "Tournament",
+                "Roulette" => "Choosing a course",
                 // CC Classes
                 "50cc" => "50cc",
                 "100cc" => "100cc",
@@ -418,8 +431,67 @@ namespace Ryujinx.Ava.Systems.PlayReport
                 "Battle" => "Battle Mode",
                 "RaceStart" => "Selecting a Course",
                 "Race" => "Racing",
-                _ => FormattedValue.ForceReset
+                // [Nextendo] Unhandled et non ForceReset : une transition d'écran qu'on ne connaît
+                // pas ne veut pas dire « le joueur ne fait plus rien ». Effacer sur l'inconnu
+                // videeait la présence à chaque menu non répertorié.
+                _ => FormattedValue.Unhandled
             };
+
+        /// <summary>
+        /// [Nextendo] La salle « match » du rapport de jeu de Mario Kart 8 Deluxe, émise à la FIN
+        /// de chaque course. C'est la seule source qui nomme le circuit.
+        ///
+        /// Relevé réel du 19/08/2026, expurgé de ce qui ne nous sert pas :
+        ///   "Mode": "Internet", "Rule": "VS", "Engine": "100cc",
+        ///   "Course": "Gu_FirstCircuit", "InternetMode": "Anybody-World"
+        ///
+        /// « Mode » vaut ici Internet ou non : c'est le seul endroit du rapport où le jeu dit
+        /// lui-même qu'il était en ligne. Le champ « Course » porte le nom de DOSSIER interne du
+        /// circuit ; sa traduction en nom affiché vit dans <see cref="NextendoMk8Courses"/>, et un
+        /// circuit absent de cette table n'affiche rien plutôt qu'un nom inventé.
+        /// </summary>
+        private static FormattedValue MarioKart8Deluxe_Match(SparseMultiValue values)
+        {
+            string Lire(string cle)
+                => values.Matched.TryGetValue(cle, out Value v) ? (v.StringValue ?? "") : "";
+
+            string mode = Lire("Mode");
+            string regle = Lire("Rule");
+            string cylindree = Lire("Engine");
+            string circuit = Lire("Course");
+
+            List<string> tete = [];
+            if (mode.Length > 0)
+            {
+                tete.Add(mode == "Internet" ? "Online" : "Offline");
+            }
+            if (regle.Length > 0)
+            {
+                tete.Add(regle);
+            }
+            if (cylindree.Length > 0)
+            {
+                tete.Add(cylindree);
+            }
+
+            if (tete.Count == 0)
+            {
+                return FormattedValue.Unhandled;
+            }
+
+            // Le circuit n'est PAS renvoyé ici, bien qu'il figure dans ce rapport : celui-ci
+            // n'arrive qu'à la fin de la course, donc l'afficher reviendrait à nommer la piste
+            // précédente pendant toute la suivante. Il est lu en temps réel au chargement, par
+            // NextendoCourseWatcher. On garde tout de même le champ pour le journal : c'est la
+            // seule source qui confirme le nom interne vu par le système de fichiers.
+            if (circuit.Length > 0)
+            {
+                Logger.Debug?.Print(LogClass.Application,
+                    $"[Nextendo] fin de course sur {circuit} ({mode} {regle} {cylindree})");
+            }
+
+            return DiscordIntegrationModule.PrepareMultilineRpcString(string.Join(" · ", tete), "");
+        }
 
         private static FormattedValue PokemonSV(MultiValue values)
         {

@@ -79,7 +79,11 @@ namespace Ryujinx.Ava.Systems.PlayReport
                 ["0100152000022000", "010075100e8ec000"], // Mario Kart 8 Deluxe
                 spec => spec
                     .WithDescription(
-                        "based on what modes you're selecting in the menu & whether or not you're in a race.")
+                        "based on what modes you're selecting in the menu, whether you're online, and which course you just raced.")
+                    // [Nextendo] La salle « match » d'abord : elle est plus riche que la simple
+                    // transition d'écran, et les deux jeux de clés ne se recouvrent pas (l'une est
+                    // capitalisée, l'autre non), donc aucune ne vole le tour de l'autre.
+                    .AddSparseMultiValueFormatter(["Mode", "Rule", "Engine", "Course"], MarioKart8Deluxe_Match)
                     .AddValueFormatter("To", MarioKart8Deluxe_Mode)
             )
             .AddSpec(

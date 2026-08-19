@@ -1036,9 +1036,9 @@ namespace Ryujinx.Graphics.Vulkan
 
             // [Nextendo] Une extinction ne doit JAMAIS emporter l'application.
             //
-            // Symptome observe : apres un arret anormal de l'invite (un jeu qui s'abat lui-meme sur
-            // une erreur fatale), cette liberation levait une NullReferenceException qui remontait
-            // jusqu'au gestionnaire global et tuait Ryujinx — le joueur voyait « l'emulateur a
+            // Mesure du 2026-08-14 : apres un arret anormal de l'invite (Splatoon 3 s'abat lui-meme
+            // sur 2162-0001), cette liberation levait une NullReferenceException qui remontait
+            // jusqu'au gestionnaire global et tuait Ryujinx — l'utilisateur voyait « l'emulateur a
             // crash » alors que l'emulation etait deja terminee et qu'il aurait suffi de revenir au
             // menu. Le drapeau _initialized ne protege pas des objets partiellement construits.
             // On libere donc au mieux, et on journalise ce qui echoue au lieu de l'escalader.
@@ -1093,7 +1093,7 @@ namespace Ryujinx.Graphics.Vulkan
             Liberer("device", () => Api.DestroyDevice(_device, null));
             Liberer("debugMessenger", () => _debugMessenger.Dispose());
 
-            // Last step destroy the instance
+            // Dernier geste : detruire l'instance.
             Liberer("instance", () => _instance.Dispose());
         }
 

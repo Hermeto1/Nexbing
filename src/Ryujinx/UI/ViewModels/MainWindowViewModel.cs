@@ -1928,11 +1928,15 @@ namespace Ryujinx.Ava.UI.ViewModels
 
                 if (modsIgnores.Count > 0)
                 {
+                    // On affiche le CHEMIN de chaque dossier, et on dit d'où il vient. Le nom seul
+                    // valait « exefs » quand le mod est posé à plat sous le dossier du titre : un
+                    // joueur qui n'a rien installé lisait une accusation sans savoir quoi regarder.
                     await ContentDialogHelper.CreateInfoDialog(
                         LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ModsBlockedTitle],
                         LocaleManager.GetFormatted(
                             LocaleKeys.Dialog_Nextendo_ModsBlockedMessage,
-                            string.Join("\n", modsIgnores.Select(m => "• " + m))),
+                            string.Join("\n", modsIgnores.Select(m => "• " + m))
+                                + "\n\n" + LocaleManager.Instance[LocaleKeys.Dialog_Nextendo_ModsBlockedWhere]),
                         LocaleManager.Instance[LocaleKeys.InputDialogOk],
                         string.Empty,
                         "Nextendo Network");
@@ -1947,7 +1951,12 @@ namespace Ryujinx.Ava.UI.ViewModels
             //   - this title is on a version the server doesn't support;
             //   - no online profile exists yet (a guest profile counts as linked).
             // Surface the reason(s) in a single dialog; offline play is never affected.
-            if (application.IsNextendoCompatible)
+            // [Nextendo] En mode « serveur personnalisé », toute cette porte saute : elle
+            // interroge NOTRE serveur (interrupteur d'arrêt, version supportée) et exige un
+            // compte chez NOUS. Quelqu'un qui joue sur son propre serveur n'a rien à voir avec
+            // ces conditions, et les lui appliquer reviendrait à l'empêcher de jouer au nom
+            // d'un service qu'il a justement désactivé.
+            if (application.IsNextendoCompatible && !NextendoServerOverride.HorsNextendo)
             {
                 // Evaluate the gate FRESH every launch — OnlineBlocked is runtime-only, so reset
                 // it first or a stale "blocked" from a previous launch (or a since-created guest)

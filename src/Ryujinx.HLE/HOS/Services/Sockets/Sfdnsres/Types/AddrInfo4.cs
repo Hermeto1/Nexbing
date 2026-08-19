@@ -7,21 +7,18 @@ using System.Runtime.InteropServices;
 
 namespace Ryujinx.HLE.HOS.Services.Sockets.Sfdnsres.Types
 {
-    // [Nextendo] sockaddr compacte rendue par getaddrinfo. Le seul vrai defaut etait sin_len : il
-    // valait sizeof(Array4) = 4 au lieu de la taille complete de la sockaddr (16). Avec sin_len = 4,
-    // le resolveur invite ne lisait que 4 octets et n'en tirait jamais l'adresse : il construisait sa
-    // sockaddr de connexion avec une adresse nulle et tentait un connect vers 0.0.0.0 (« port ok,
-    // adresse 0 » dans la trace).
-    //
-    // Mesure faite sur la sockaddr de connexion reellement construite par grpc : une fois sin_len = 16,
-    // grpc lit bien l'adresse et la projette en IPv4-mapped IPv6 pour sa socket double pile
-    //     00 1C <port> <flowinfo> ::ffff:<adresse> <scope>
-    // et il relit nos sin_port / sin_addr en ordre HOTE (petit-boutiste) avant d'appliquer htons/htonl,
-    // c'est-a-dire qu'il les inverse une fois. Les octets sur le fil doivent donc rester en ordre HOTE,
-    // PAS en ordre reseau. Le code d'origine produisait deja de l'ordre hote (HostToNetworkOrder dans le
-    // constructeur puis un second echange dans ToNetworkOrder) : ne pas « corriger » cela en ordre
-    // reseau, l'essai a fait connecter grpc vers l'adresse aux octets inverses et le jeu a plante.
-    // Seul sin_len devait etre repare.
+    // [Nextendo] Packed getaddrinfo sockaddr — Mythrax bug #1 fix (getaddrinfo ai_addr packing).
+    // The ONLY real bug was sin_len: it was sizeof(Array4)=4 instead of the full sockaddr size (16).
+    // With sin_len=4 the guest resolver treated the sockaddr as 4 bytes and grpc never read the address
+    // -> it built the connect sockaddr with a zero address -> connect to 0.0.0.0 ("port ok, addr 0").
+    // Proof (grpc's actual connect sockaddr, captured): once sin_len=16, grpc DOES read the address and
+    // maps the IPv4 result into an IPv4-mapped IPv6 sockaddr_in6 for its dual-stack socket:
+    //     00 1C <port> <flowinfo> ::ffff:<addr> <scope>
+    // and it reads our sin_port/sin_addr as HOST (little-endian) then applies htons/htonl — i.e. it
+    // byte-swaps them once. So the wire bytes must be HOST-order (the value read little-endian), NOT
+    // network order. The original code already produced host-order bytes (ctor HostToNetworkOrder + a
+    // second swap in ToNetworkOrder); do NOT "fix" that to network order (that made grpc connect to the
+    // byte-reversed 194.29.178.51:47873 and the game crashed). Only sin_len needed correcting.
     [StructLayout(LayoutKind.Sequential, Pack = 1, Size = 0x10)]
     struct AddrInfo4
     {
@@ -33,7 +30,7 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Sfdnsres.Types
 
         public AddrInfo4(IPAddress address, short port)
         {
-            Length = (byte)Unsafe.SizeOf<AddrInfo4>(); // 16 (valait sizeof(Array4) = 4 : le defaut)
+            Length = (byte)Unsafe.SizeOf<AddrInfo4>(); // 16 (was sizeof(Array4)=4 — the bug)
             Family = (byte)AddressFamily.InterNetwork;
             Port = IPAddress.HostToNetworkOrder(port);
             Address = new Array4<byte>();

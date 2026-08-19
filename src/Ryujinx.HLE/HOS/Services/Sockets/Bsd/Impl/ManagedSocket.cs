@@ -33,16 +33,16 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
         // [Nextendo] Le raccrochage du pair a-t-il deja ete signale a l'invite par un POLLHUP synthetise ?
         // Voir ManagedSocketPollManager.Poll : la notification est volontairement A FRONT et non a niveau.
         // POSIX rapporte POLLHUP a chaque appel, mais l'invite peut garder longtemps un descripteur mort dans
-        // son ensemble de sondage sans interet en lecture (mesure : 39 s avec req=0) ; un POLLHUP a niveau
+        // son ensemble de sondage sans interet en lecture (mesure S3 : 39 s avec req=0) ; un POLLHUP a niveau
         // ferait alors rendre chaque poll instantanement, donc une boucle folle. On previent une fois, ce qui
         // suffit a rompre la cecite, sans risquer la boucle si l'invite ignore l'avertissement.
         public bool HangupReported { get; set; }
 
-        // [Nextendo] getsockopt doit rendre ce que setsockopt a accepte. Quand SetSocketOption feint le succes
-        // sur une option que cette emulation ne sait pas traduire (voir les branches tolerantes plus bas), on
-        // retient la valeur ici pour que GetSocketOption la rende au lieu d'un EOPNOTSUPP. grpc-core pose
-        // TCP_NODELAY / SO_REUSEADDR et les relit aussitot : un « set OK / get erreur » le faisait fermer le
-        // socket avant meme le connect, donc avant le moindre echange.
+        // [Nextendo] getsockopt must return what setsockopt accepted. When SetSocketOption feigns success on
+        // an option this emulation can't map (see the tolerant paths below), we remember the value here so
+        // GetSocketOption returns it instead of EOPNOTSUPP. grpc-core sets TCP_NODELAY / SO_REUSEADDR / etc.
+        // and reads them straight back; a set-ok / get-EOPNOTSUPP mismatch made it close before connect
+        // (the socket died before the NPLN handshake even started).
         private readonly Dictionary<(BsdSocketOption Option, SocketOptionLevel Level), byte[]> _feignedSockOpts = new();
 
         public ManagedSocket(AddressFamily addressFamily, SocketType socketType, ProtocolType protocolType, string lanInterfaceId)
@@ -169,21 +169,20 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
 
         public LinuxError Connect(IPEndPoint remoteEndPoint)
         {
-            // [Nextendo] Le resolveur gRPC de certains clients en ligne desassemble mal l'addrinfo qu'on lui
-            // rend et tend au socket 0.0.0.0 / :: — l'adresse est perdue, le port survit. Le connect echoue
-            // alors sans qu'aucun ClientHello ne parte. On substitue la redirection DNS notee POUR CE PORT,
-            // afin que la connexion atteigne le service reellement vise. Le HTTP passe par GetHostByName (un
-            // autre chemin) et n'est jamais a 0.0.0.0 : seul le connect gRPC casse est rattrape ici. Socket
-            // IPv6 a double pile -> l'adresse IPv4 est mappee en ::ffff:.
+            // [Nextendo] The NPLN gRPC resolver mis-deserializes our packed addrinfo and hands the socket
+            // 0.0.0.0 / :: (address lost, port kept) -> the connect fails, no ClientHello, NPLN 2321-4992.
+            // Substitute the last DNS-MITM redirect (our server IP) so the gRPC reaches our server. HTTP
+            // uses GetHostByName (a different path) and is never 0.0.0.0, so this only rescues the broken
+            // gRPC connects. dualMode IPv6 socket -> map the IPv4 server IP to ::ffff:.
             bool grpcConnect = false;
             {
                 IPAddress a = remoteEndPoint.Address;
                 bool isAny = a.Equals(IPAddress.Any) || a.Equals(IPAddress.IPv6Any)
                              || (a.IsIPv4MappedToIPv6 && a.MapToIPv4().Equals(IPAddress.Any));
-                // Repli choisi PAR PORT : le port designe le service vise sans ambiguite. En prenant « la
-                // derniere resolution », toutes destinations confondues, une connexion pouvait partir vers le
-                // serveur d'un autre jeu — mesure du 2026-08-15, douze fois sur vingt-deux chez un testeur,
-                // ce qui rendait la jonction en partie privee aleatoire.
+                // Repli choisi PAR PORT : le port designe le service vise sans ambiguite. En prenant
+                // « la derniere resolution », toutes destinations confondues, une connexion pouvait
+                // partir vers le serveur d'un autre jeu — mesure du 2026-08-15, douze fois sur
+                // vingt-deux chez un testeur, ce qui rendait la jonction en partie privee aleatoire.
                 IPAddress sub = Ryujinx.HLE.HOS.Services.Sockets.Sfdnsres.Proxy.DnsMitmResolver.RedirectionPour(remoteEndPoint.Port);
                 if (isAny && sub != null)
                 {
@@ -192,23 +191,27 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
                     {
                         sub = sub.MapToIPv6();
                     }
-
-                    Logger.Info?.PrintMsg(LogClass.ServiceBsd, $"[Nextendo] Connect target was {a}:{remoteEndPoint.Port} (lost address) -> substituting the redirect noted for this port");
+                    Logger.Info?.PrintMsg(LogClass.ServiceBsd, $"[Nextendo] Connect target was {a}:{remoteEndPoint.Port} (lost address) -> substituting {sub}");
                     remoteEndPoint = new IPEndPoint(sub, remoteEndPoint.Port);
                     grpcConnect = true;
                 }
                 else if (isAny)
                 {
-                    // Adresse perdue sur un port SANS redirection connue : typiquement un pair du jeu en
-                    // ligne. On ne substitue rien — envoyer ce trafic ailleurs casserait le pair-a-pair — mais
-                    // on le trace, parce que c'est exactement la mesure qui manquera pour comprendre un echec
-                    // d'etablissement P2P.
-                    Logger.Debug?.PrintMsg(LogClass.ServiceBsd,
-                        $"[Nextendo] Connect target was {a}:{remoteEndPoint.Port} (lost address) — aucune redirection pour ce port, on ne substitue pas (pair ?)");
+                    // Adresse perdue sur un port SANS redirection connue : typiquement un pair du
+                    // jeu en ligne. On ne substitue rien — envoyer ce trafic vers nos serveurs
+                    // casserait le pair-a-pair — mais on le TRACE, parce que c'est exactement la
+                    // mesure qui manquera pour comprendre un echec d'etablissement P2P.
+                    Logger.Warning?.Print(LogClass.ServiceBsd,
+                        $"[Nextendo] Connect target was {a}:{remoteEndPoint.Port} (lost address) — AUCUNE redirection pour ce port, on ne substitue pas (pair ?)");
                 }
             }
 
-            bool isLDNPrivateIP = remoteEndPoint.Address.ToString().StartsWith("192.168.");
+            // [Nextendo] La boucle locale est traitee comme le reseau local : une redirection
+            // qui atterrit sur 127.0.0.1 signifie que l adresse du serveur n a jamais ete
+            // configuree, et la masquer transformait ca en panne inexplicable.
+            bool isLDNPrivateIP = remoteEndPoint.Address.ToString().StartsWith("192.168.")
+                                  || IPAddress.IsLoopback(remoteEndPoint.Address)
+                                  || (remoteEndPoint.Address.IsIPv4MappedToIPv6 && IPAddress.IsLoopback(remoteEndPoint.Address.MapToIPv4()));
             if (isLDNPrivateIP)
             {
                 Logger.Info?.PrintMsg(LogClass.ServiceBsd, $"Connecting to: {ProtocolType}/{remoteEndPoint.Address}:{remoteEndPoint.Port}");
@@ -226,35 +229,43 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
             }
             catch (SocketException exception)
             {
-                if (!Blocking && exception.ErrorCode == (int)WsaError.WSAEWOULDBLOCK)
+                // [Nextendo] SocketErrorCode et non ErrorCode : sous Unix, le second est
+                // l errno natif (EAGAIN vaut 11) et non la valeur Winsock (10035). Ce test
+                // n etait donc vrai que sous Windows. Sur Linux et macOS, une connexion non
+                // bloquante sautait toute la branche ci-dessous et rendait EAGAIN au jeu au
+                // lieu d EINPROGRESS — et le contournement de completion synchrone du service
+                // en ligne ne s executait jamais non plus.
+                if (!Blocking && exception.SocketErrorCode == SocketError.WouldBlock)
                 {
-                    // [Nextendo] Pour le connect gRPC, ne PAS rendre EINPROGRESS en comptant sur le client
-                    // pour sonder le socket en POLLOUT : c'est RACE. Il n'ajoute le socket a son ensemble de
-                    // sondage que tardivement, si bien que l'achevement etait detecte jusqu'a ~74 s plus tard
-                    // et que tout le parcours en ligne calait sur certaines executions. Cote hote le connect
-                    // aboutit en une dizaine de millisecondes : on bloque donc brievement ici et on rend
-                    // SUCCESS des que le socket est inscriptible (donc connecte). Le client repart aussitot
-                    // sur TLS/gRPC — deterministe. Limite aux connexions gRPC (celles dont l'adresse a ete
-                    // substituee) ; les autres sockets gardent l'EINPROGRESS non bloquant d'origine.
-                    // Les deux branches ont ete comparees, le correctif de revents en place :
-                    //   SUCCESS ici  -> le client prend sa branche « deja connecte » et la poignee de main TLS
-                    //                   part vraiment.
-                    //   EINPROGRESS  -> il enregistre bien le socket (94 728 sondages, rev=Output) mais
-                    //                   n'execute jamais son on_writable : il n'emet STRICTEMENT RIEN.
-                    // NEXTENDO_GRPC_CONNECT_SYNC=0 permet de retenter la voie asynchrone.
+                    // [Nextendo] For the grpc/NPLN connect, do NOT return EINPROGRESS and rely on grpc to poll
+                    // the connecting socket for POLLOUT — that is RACY: grpc adds the socket to its pollset
+                    // late, so completion was detected up to ~74s later and the whole online flow stalled on
+                    // some runs. The host connect to our VPS completes in ~10ms, so block briefly here and
+                    // return SUCCESS as soon as it is writable (connected). grpc then has a connected socket
+                    // immediately and proceeds straight to TLS/gRPC — deterministic. Scoped to grpc connects
+                    // (the substituted ones); NEX/other sockets keep the original non-blocking EINPROGRESS.
+                    // [Nextendo] Kept ON by default on measured evidence. Both branches were compared with the
+                    // deferred-poll revents fix in place:
+                    //   SUCCESS here  -> grpc takes tcp_client's "connected immediately" branch. The socket is
+                    //                    often absent from the pollset (polls carry 1 fd, the wakeup eventfd),
+                    //                    but when it is present the flow reaches ClientHello -> ServerHello.
+                    //   EINPROGRESS   -> grpc's async path DOES register the socket (94728 polls with 2 fds,
+                    //                    rev=Output wr=True conn=True) yet never runs on_writable, so it never
+                    //                    sends anything at all (SendMMsg=0). Strictly worse.
+                    // Set NEXTENDO_GRPC_CONNECT_SYNC=0 to try the async path again once on_writable dispatches.
                     if (grpcConnect && Environment.GetEnvironmentVariable("NEXTENDO_GRPC_CONNECT_SYNC") != "0")
                     {
                         try
                         {
-                            if (Socket.Poll(2_000_000, SelectMode.SelectWrite)
-                                && !Socket.Poll(0, SelectMode.SelectError))
+                            if (Socket.Poll(2_000_000, System.Net.Sockets.SelectMode.SelectWrite)
+                                && !Socket.Poll(0, System.Net.Sockets.SelectMode.SelectError))
                             {
                                 Logger.Info?.PrintMsg(LogClass.ServiceBsd, "[Nextendo] grpc connect completed synchronously (blocked for host completion) -> SUCCESS");
 
                                 return LinuxError.SUCCESS;
                             }
                         }
-                        catch { /* on retombe sur EINPROGRESS */ }
+                        catch { /* fall through to EINPROGRESS */ }
                     }
 
                     return LinuxError.EINPROGRESS;
@@ -533,8 +544,8 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
             }
         }
 
-        // [Nextendo] Remplit optionValue avec la valeur qu'un setsockopt precedent a feint d'accepter (ou des
-        // zeros), pour que getsockopt rende ce que le client a pose au lieu d'echouer.
+        // [Nextendo] Fill optionValue with the value a prior setsockopt feigned success on (or zeros), so
+        // getsockopt round-trips what the client set instead of failing.
         private void ReturnFeignedSockOpt(BsdSocketOption option, SocketOptionLevel level, Span<byte> optionValue)
         {
             optionValue.Clear();
@@ -553,8 +564,8 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
 
                 if (result != LinuxError.SUCCESS)
                 {
-                    // [Nextendo] Tolerant, en miroir de SetSocketOption : rendre la valeur posee par le client
-                    // (ou zero) avec SUCCESS. Un « set OK / get erreur » faisait fermer le socket avant connect.
+                    // [Nextendo] Tolerant, mirroring SetSocketOption: return the value the client set (or zero)
+                    // with SUCCESS. A set-ok / get-error mismatch made grpc close before connect.
                     Logger.Warning?.Print(LogClass.ServiceBsd, $"GetSockOpt Option toléré (option non validée): {option} Level: {level}");
                     ReturnFeignedSockOpt(option, level, optionValue);
 
@@ -740,6 +751,78 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
         }
 
         // TODO: Find a way to support passing the timeout somehow without changing the socket ReceiveTimeout.
+        /// <summary>
+        /// Envoie les segments d un message disperse un par un, pour les implementations de
+        /// socket qui n ont pas d envoi vectorise. S arrete au premier segment non entierement
+        /// accepte, comme le ferait un socket hote dont le tampon d envoi se remplit.
+        /// </summary>
+        private int SendSegments(ArraySegment<byte>[] buffers, SocketFlags flags, out SocketError socketError)
+        {
+            socketError = SocketError.Success;
+
+            int total = 0;
+
+            foreach (ArraySegment<byte> buffer in buffers)
+            {
+                if (buffer.Count == 0)
+                {
+                    continue;
+                }
+
+                int sent = Socket.Send(buffer.AsSpan(), flags, out socketError);
+
+                if (socketError != SocketError.Success)
+                {
+                    return total;
+                }
+
+                total += sent;
+
+                if (sent < buffer.Count)
+                {
+                    break;
+                }
+            }
+
+            return total;
+        }
+
+        /// <summary>
+        /// Remplit les segments d un message disperse un par un, pour les implementations de
+        /// socket qui n ont pas de reception vectorisee. S arrete des qu un segment n est pas
+        /// rempli en entier, pour qu un datagramme plus court ne bloque pas en attendant la suite.
+        /// </summary>
+        private int ReceiveSegments(ArraySegment<byte>[] buffers, SocketFlags flags, out SocketError socketError)
+        {
+            socketError = SocketError.Success;
+
+            int total = 0;
+
+            foreach (ArraySegment<byte> buffer in buffers)
+            {
+                if (buffer.Count == 0)
+                {
+                    continue;
+                }
+
+                int read = Socket.Receive(buffer.AsSpan(), flags, out socketError);
+
+                if (socketError != SocketError.Success)
+                {
+                    return total;
+                }
+
+                total += read;
+
+                if (read < buffer.Count)
+                {
+                    break;
+                }
+            }
+
+            return total;
+        }
+
         public LinuxError RecvMMsg(out int vlen, BsdMMsgHdr message, BsdSocketFlags flags, TimeVal timeout)
         {
             vlen = 0;
@@ -763,7 +846,21 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
 
             try
             {
-                int receiveSize = (Socket as DefaultSocket).BaseSocket.Receive(ConvertMessagesToBuffer(message), ConvertBsdSocketFlags(flags), out SocketError socketError);
+                SocketError socketError;
+                int receiveSize;
+
+                if (Socket is DefaultSocket hostSocket)
+                {
+                    receiveSize = hostSocket.BaseSocket.Receive(ConvertMessagesToBuffer(message), ConvertBsdSocketFlags(flags), out socketError);
+                }
+                else
+                {
+                    // [Nextendo] Le socket n est pas toujours adosse a un socket hote : avec
+                    // LAN Play ou RyuLDN c est un socket virtuel, qui n a pas de reception
+                    // vectorisee — d ou le remplissage segment par segment au lieu du
+                    // transtypage, qui levait ici.
+                    receiveSize = ReceiveSegments(ConvertMessagesToBuffer(message), ConvertBsdSocketFlags(flags), out socketError);
+                }
 
                 if (receiveSize > 0)
                 {
@@ -811,7 +908,19 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
                 {
                     Logger.Info?.Print(LogClass.ServiceBsd, $"[DIAG] Bsd.SendMMsg TLS hs=0x{mmsgBuf[0].Array[mmsgBuf[0].Offset + 5]:x2} len={mmsgBuf[0].Count} remote={RemoteEndPoint}");
                 }
-                int sendSize = (Socket as DefaultSocket).BaseSocket.Send(mmsgBuf, ConvertBsdSocketFlags(flags), out SocketError socketError);
+                SocketError socketError;
+                int sendSize;
+
+                if (Socket is DefaultSocket hostSocket)
+                {
+                    sendSize = hostSocket.BaseSocket.Send(mmsgBuf, ConvertBsdSocketFlags(flags), out socketError);
+                }
+                else
+                {
+                    // [Nextendo] Comme dans RecvMMsg : un socket virtuel (LAN Play, RyuLDN)
+                    // n a pas d envoi vectorise, les segments partent donc l un apres l autre.
+                    sendSize = SendSegments(mmsgBuf, ConvertBsdSocketFlags(flags), out socketError);
+                }
 
                 if (sendSize > 0)
                 {

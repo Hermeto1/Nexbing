@@ -1,7 +1,7 @@
 using LibHac.Common;
 using Ryujinx.Horizon.Bcat.Types;
-using Ryujinx.Horizon.Common;
 using Ryujinx.Horizon.Sdk.Arp;
+using Ryujinx.Horizon.Common;
 using Ryujinx.Horizon.Sdk.Bcat;
 using Ryujinx.Horizon.Sdk.Sf;
 using System;
@@ -78,6 +78,9 @@ namespace Ryujinx.Horizon.Bcat.Ipc
 
                         resultCode = _libHacAdmin.Get.CreateDeliveryCacheStorageServiceWithApplicationId(
                             ref libHacService.Ref, new LibHac.ApplicationId(launchProperty.ApplicationId.Id));
+
+                        Ryujinx.Common.Logging.Logger.Info?.Print(Ryujinx.Common.Logging.LogClass.ServiceBcat,
+                            $"[Nextendo] pid {pid} -> titre {launchProperty.ApplicationId.Id:X16}, repli admin -> 0x{resultCode.Value:X}");
                     }
                 }
             }
@@ -100,6 +103,11 @@ namespace Ryujinx.Horizon.Bcat.Ipc
             using SharedRef<LibHac.Bcat.Impl.Ipc.IDeliveryCacheStorageService> libHacService = new();
 
             LibHac.Result resultCode = _libHacService.Get.CreateDeliveryCacheStorageServiceWithApplicationId(ref libHacService.Ref, new LibHac.ApplicationId(applicationId.Id));
+
+            // [Nextendo] Splatoon 3 recoit 2002-6400 (PermissionDenied) au demarrage, et l'origine
+            // etait invisible : ce resultat traverse la couche telle quelle. On le journalise.
+            Ryujinx.Common.Logging.Logger.Info?.Print(Ryujinx.Common.Logging.LogClass.ServiceBcat,
+                $"[Nextendo] CreateDeliveryCacheStorageServiceWithApplicationId -> 0x{resultCode.Value:X} ({(resultCode.IsSuccess() ? "succes" : "ECHEC")})");
 
             if (resultCode.IsSuccess())
             {

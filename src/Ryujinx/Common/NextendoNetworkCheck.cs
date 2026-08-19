@@ -1,3 +1,4 @@
+using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using System;
 using System.Buffers.Binary;
@@ -65,12 +66,25 @@ namespace Ryujinx.Ava.Common
         // responder has to sit on a real public IP and see the client's true source port, which a tunnel
         // would mask. Falls back to the backend IPs for the single-host setup where they coincide.
         // Addresses come from environment variables, not baked into this open-source tree.
-        private static readonly string Nncs1 =
+        private static readonly string Nncs1Configure =
             Environment.GetEnvironmentVariable("NEXTENDO_NNCS1_IP")
             ?? Environment.GetEnvironmentVariable("NEXTENDO_SERVER_IP") ?? "127.0.0.1";
-        private static readonly string Nncs2 =
+        private static readonly string Nncs2Configure =
             Environment.GetEnvironmentVariable("NEXTENDO_NNCS2_IP")
             ?? Environment.GetEnvironmentVariable("NEXTENDO_NAT_IP") ?? "127.0.0.1";
+
+        // [Nextendo] Mode « serveur personnalisé » : le joueur fait tourner l'émulateur sur SON
+        // serveur, entièrement hors de Nextendo Network. Les deux répondeurs suivent alors les
+        // adresses qu'il a saisies. Hors de ce mode, rien ne change.
+        //
+        // ⚠️ Les champs Nncs1Configure/Nncs2Configure ci-dessus gardent leur forme EXACTE : le
+        // script d'injection du build (distribution/nextendo/bake_release.py) les remplace par
+        // recherche de chaîne littérale et échoue si le motif bouge.
+        private static string Nncs1 =>
+            NextendoServerOverride.ServerAddress?.ToString() ?? Nncs1Configure;
+
+        private static string Nncs2 =>
+            NextendoServerOverride.NatAddress?.ToString() ?? Nncs2Configure;
         private static readonly int[] _nncsPorts = [10025, 10125];
 
         // Test id the responder echoes back. The Switch sends 101/102/103; any id it knows is

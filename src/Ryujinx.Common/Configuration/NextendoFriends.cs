@@ -239,23 +239,20 @@ namespace Ryujinx.Common.Configuration
                         string name = f.TryGetProperty("name", out JsonElement n) ? (n.GetString() ?? "") : "";
                         byte[] appField = null;
                         int status = 0;
-                        if (f.TryGetProperty("presence", out JsonElement pres) && pres.ValueKind == JsonValueKind.Object)
+                        if (f.TryGetProperty("presence", out JsonElement pres0) && pres0.ValueKind == JsonValueKind.Object
+                            && pres0.TryGetProperty("status", out JsonElement st) && st.ValueKind == JsonValueKind.Number)
                         {
-                            if (pres.TryGetProperty("status", out JsonElement st) && st.ValueKind == JsonValueKind.Number)
+                            status = st.GetInt32();
+                        }
+                        if (f.TryGetProperty("presence", out JsonElement pres) && pres.ValueKind == JsonValueKind.Object
+                            && pres.TryGetProperty("app_field", out JsonElement af) && af.ValueKind == JsonValueKind.String)
+                        {
+                            string b64 = af.GetString();
+                            if (!string.IsNullOrEmpty(b64))
                             {
-                                status = st.GetInt32();
-                            }
-                            if (pres.TryGetProperty("app_field", out JsonElement af) && af.ValueKind == JsonValueKind.String)
-                            {
-                                string b64 = af.GetString();
-                                if (!string.IsNullOrEmpty(b64))
-                                {
-                                    try { appField = Convert.FromBase64String(b64); } catch { appField = null; }
-                                }
+                                try { appField = Convert.FromBase64String(b64); } catch { appField = null; }
                             }
                         }
-                        // Le NSA arrive en hexadecimal (16 chiffres) : c'est l'identifiant sous lequel
-                        // NPLN nomme l'ami, donc celui que Splatoon 3 redemandera au service friend:.
                         ulong nsa = 0;
                         if (f.TryGetProperty("nsa", out JsonElement nsaEl) && nsaEl.ValueKind == JsonValueKind.String)
                         {

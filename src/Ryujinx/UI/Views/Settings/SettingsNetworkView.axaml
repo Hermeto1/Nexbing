@@ -39,6 +39,8 @@
                             Content="{ext:Locale MultiplayerModeLdnRyu}" />
                         <ComboBoxItem
                             Content="{ext:Locale MultiplayerModeLdnMitm}" />
+                        <ComboBoxItem
+                            Content="{ext:Locale MultiplayerModeLanPlay}" />
                     </ComboBox>
                     <CheckBox Margin="10,0,0,0" IsChecked="{Binding DisableP2P}">
                         <TextBlock Text="{ext:Locale MultiplayerDisableP2P}"
@@ -77,6 +79,50 @@
                                     Text="{ext:Locale ClearLdnPass}" />
                     </Button>
                 </StackPanel>
+                <StackPanel Margin="10,0,0,0"
+                    Orientation="Horizontal"
+                    IsVisible="{Binding IsLanPlaySelected}">
+                    <TextBlock VerticalAlignment="Center"
+                        Text="{ext:Locale MultiplayerLanPlayServer}"
+                        ToolTip.Tip="{ext:Locale MultiplayerLanPlayServerTooltip}"
+                        Width="200" />
+                    <TextBox Name="LanPlayServer"
+                        Text="{Binding LanPlayServer}"
+                        Width="250"
+                        ToolTip.Tip="{ext:Locale MultiplayerLanPlayServerTooltip}"
+                        Watermark="{ext:Locale MultiplayerLanPlayServerWatermark}" />
+                    <Button
+                        Name="TestLanPlayButton"
+                        MinWidth="90"
+                        Margin="10,0,0,0"
+                        IsEnabled="{Binding !IsLanPlayTestRunning}"
+                        ToolTip.Tip="{ext:Locale MultiplayerLanPlayTestTooltip}"
+                        Click="TestLanPlayButton_OnClick">
+                        <TextBlock HorizontalAlignment="Center"
+                            Text="{ext:Locale MultiplayerLanPlayTest}" />
+                    </Button>
+                </StackPanel>
+                <TextBlock Margin="10,0,0,0"
+                    Name="LanPlayTestResultBlock"
+                    FontStyle="Italic"
+                    MaxWidth="600"
+                    TextWrapping="Wrap"
+                    Focusable="False"
+                    IsVisible="{Binding IsLanPlayTestResultVisible}"
+                    Text="{Binding LanPlayTestResult}" />
+                <StackPanel Margin="10,0,0,0"
+                    Orientation="Horizontal"
+                    IsVisible="{Binding IsLanPlaySelected}">
+                    <TextBlock VerticalAlignment="Center"
+                        Text="{ext:Locale MultiplayerLanPlayVirtualIp}"
+                        ToolTip.Tip="{ext:Locale MultiplayerLanPlayVirtualIpTooltip}"
+                        Width="200" />
+                    <TextBox Name="LanPlayVirtualIp"
+                        Text="{Binding LanPlayVirtualIp}"
+                        Width="250"
+                        ToolTip.Tip="{ext:Locale MultiplayerLanPlayVirtualIpTooltip}"
+                        Watermark="{ext:Locale MultiplayerLanPlayVirtualIpWatermark}" />
+                </StackPanel>
                 <TextBlock  Margin="10,0,0,0"
                     VerticalAlignment="Center"
                     Name="InvalidLdnPassphraseBlock"
@@ -100,6 +146,41 @@
                         HorizontalContentAlignment="Left"
                         ItemsSource="{Binding NetworkInterfaceList}"
                         Width="250" />
+                </StackPanel>
+                <Separator Height="1" />
+
+                <!-- [Nextendo] Serveur personnalise. Ce n est PAS une redirection partielle :
+                     cocher cette case coupe entierement Nextendo Network — compte, amis,
+                     sauvegardes en ligne, presence, controle de version. L emulateur redevient
+                     un Ryujinx ordinaire pointe sur le serveur indique. C est pour cela que le
+                     reglage vit ici, dans Reseau, et non dans l onglet du service qu il eteint. -->
+                <TextBlock Classes="h1" Text="{ext:Locale Dialog_Nextendo_OverrideTitle}" />
+                <TextBlock Margin="10,0,0,0" Opacity="0.8" TextWrapping="Wrap" FontSize="12"
+                           Text="{ext:Locale Dialog_Nextendo_OverrideDesc}" />
+
+                <CheckBox Margin="10,0,0,0" Name="ServerOverrideToggle"
+                          Content="{ext:Locale Dialog_Nextendo_OverrideEnable}" />
+
+                <Grid Margin="10,0,0,0" ColumnDefinitions="200,300" RowDefinitions="Auto,Auto" Name="OverrideFields">
+                    <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center"
+                               Text="{ext:Locale Dialog_Nextendo_OverrideServerIp}" />
+                    <TextBox Grid.Row="0" Grid.Column="1" Name="ServerIpBox" MaxLength="45"
+                             Watermark="{ext:Locale Dialog_Nextendo_OverrideServerIpHint}" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,8,0,0" VerticalAlignment="Center"
+                               Text="{ext:Locale Dialog_Nextendo_OverrideNatIp}" />
+                    <TextBox Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Name="NatIpBox" MaxLength="45"
+                             Watermark="{ext:Locale Dialog_Nextendo_OverrideNatIpHint}" />
+                </Grid>
+
+                <TextBlock Margin="10,0,0,0" Opacity="0.7" TextWrapping="Wrap" FontSize="11"
+                           Text="{ext:Locale Dialog_Nextendo_OverrideNatWarning}" />
+
+                <StackPanel Margin="10,0,0,0" Orientation="Horizontal" Spacing="10">
+                    <Button Name="SaveOverrideButton"
+                            Content="{ext:Locale Dialog_Nextendo_OverrideSave}" />
+                    <TextBlock Name="OverrideStatusText" VerticalAlignment="Center"
+                               FontSize="12" IsVisible="False" />
                 </StackPanel>
             </StackPanel>
         </Border>

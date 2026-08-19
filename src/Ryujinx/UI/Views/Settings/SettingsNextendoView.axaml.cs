@@ -25,6 +25,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using AccAccountManager = Ryujinx.HLE.HOS.Services.Account.Acc.AccountManager;
 using AccUserProfile = Ryujinx.HLE.HOS.Services.Account.Acc.UserProfile;
+using System.Net;
 
 namespace Ryujinx.Ava.UI.Views.Settings
 {
@@ -49,6 +50,7 @@ namespace Ryujinx.Ava.UI.Views.Settings
             OpenSiteButton.Click += (_, _) => TryOpenSite("/register");
             CreateGuestButton.Click += async (_, _) => await CreateGuest();
             GuestNicknameBox.LostFocus += async (_, _) => await CheckNicknameAvailability();
+
             RerunWizardButton.Click += async (_, _) =>
             {
                 if (RyujinxApp.MainWindow is { } mw)
@@ -687,5 +689,6 @@ namespace Ryujinx.Ava.UI.Views.Settings
 
             return null;
         }
-    }
+    
+}
 }

@@ -156,6 +156,13 @@ namespace Ryujinx.HLE.HOS.Services.Fs.FileSystemProxy
             ulong size = context.Request.PtrBuff[index].Size;
 
             ReadOnlySpan<byte> buffer = context.Memory.GetSpan(position, (int)size);
+
+            // [Nextendo] Le seul endroit où l'on voit passer, en temps réel, le chemin que le
+            // jeu ouvre. Mario Kart y annonce le circuit qu'il charge bien avant de le nommer
+            // dans son rapport de fin de course. Sans effet et sans allocation tant que
+            // personne n'écoute — voir NextendoCourseWatcher.
+            Ryujinx.Common.Configuration.NextendoCourseWatcher.Observe(buffer);
+
             ReadOnlySpan<LibHac.FsSrv.Sf.Path> pathBuffer = MemoryMarshal.Cast<byte, LibHac.FsSrv.Sf.Path>(buffer);
 
             return ref pathBuffer[0];

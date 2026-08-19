@@ -83,11 +83,17 @@ namespace Ryujinx.HLE.HOS
         private static AccessControlBits.Bits AmFsPermissions => AccessControlBits.Bits.SaveDataManagement |
                                                                  AccessControlBits.Bits.CreateSaveData |
                                                                  AccessControlBits.Bits.SystemData;
-        // [Nextendo] Ces droits restent volontairement minimaux. Ils avaient ete elargis en cherchant
-        // la cause du refus d'ouverture du cache de livraison BCAT (2002-6400, PermissionDenied, sur
-        // lequel Splatoon 3 bloque au demarrage) ; le banc de test a montre que l'elargissement n'y
-        // changeait RIEN. Le vrai defaut etait le proprietaire de la sauvegarde — voir
-        // VirtualFileSystem.FixExtraData — et une fois corrige l'ouverture reussit avec ce seul bit.
+        // [Nextendo] Le client BCAT n'avait que SystemSaveData, ce qui suffit a ses propres donnees
+        // systeme mais PAS a ouvrir le cache de livraison d'une APPLICATION. Splatoon 3, qui demande
+        // le sien au demarrage, se faisait refuser : 2002-6400 (PermissionDenied) cote fichiers,
+        // remonte au jeu tel quel, boucle de reessais puis erreur a l'ecran. On ajoute donc le droit
+        // sur les sauvegardes BCAT, et de quoi la creer si elle n'existe pas encore — c'est ce que
+        // fait une console au premier lancement d'un jeu qui utilise BCAT.
+        // [Nextendo] Ces droits restent ceux d'origine, volontairement. Ils avaient ete elargis en
+        // cherchant la cause du refus d'ouverture du cache BCAT ; le banc de test a montre que
+        // l'elargissement n'y changeait RIEN. Le vrai defaut etait le proprietaire de la sauvegarde
+        // (voir VirtualFileSystem.FixExtraData), et une fois corrige, l'ouverture reussit avec ce seul
+        // bit. Donner plus a un service systeme sans necessite n'a pas lieu d'etre.
         private static AccessControlBits.Bits BcatFsPermissions => AccessControlBits.Bits.SystemSaveData;
 
         private static AccessControlBits.Bits NsFsPermissions => AccessControlBits.Bits.ApplicationInfo |

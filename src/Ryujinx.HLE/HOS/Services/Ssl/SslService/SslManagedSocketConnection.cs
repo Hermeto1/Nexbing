@@ -183,7 +183,16 @@ namespace Ryujinx.HLE.HOS.Services.Ssl.SslService
             // propagation to GUI-launched processes proved unreliable -> made unconditional.)
             System.Net.Security.RemoteCertificateValidationCallback certCallback =
                 (sender, cert, chain, errors) => true;
-            _stream = new SslStream(new NetworkStream(((DefaultSocket)((ManagedSocket)Socket).Socket).BaseSocket, false), false, certCallback, null);
+            // [Nextendo] Le socket n'est pas toujours adossé à un socket de l'hôte : avec LAN Play
+            // (et RyuLDN) c'est un socket VIRTUEL, et le transtypage direct en DefaultSocket levait
+            // ici une InvalidCastException — que le jeu présentait comme un échec d'accès au service.
+            ISocketImpl socketImpl = ((ManagedSocket)Socket).Socket;
+
+            System.IO.Stream socketStream = socketImpl is DefaultSocket hostSocket
+                ? new NetworkStream(hostSocket.BaseSocket, false)
+                : new SocketImplStream(socketImpl);
+
+            _stream = new SslStream(socketStream, false, certCallback, null);
             string origHost = hostName;
             hostName = RetrieveHostName(hostName);
 

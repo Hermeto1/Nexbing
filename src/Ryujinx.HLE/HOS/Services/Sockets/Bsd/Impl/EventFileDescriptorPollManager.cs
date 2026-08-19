@@ -53,13 +53,12 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
                     isValidEvent = true;
                 }
 
-                // [Nextendo] Un sondage qui ne demande AUCUN interet lecture/ecriture (InputEvents == 0) est
-                // VALIDE en POSIX : il attend le delai imparti et ne rapporte que POLLERR/POLLHUP. gRPC sonde
-                // son eventfd de reveil exactement ainsi pendant qu'il attend la fin d'un connect asynchrone.
-                // Le refuser avec EINVAL cassait sa boucle de sondage : il fermait le descripteur, repartait
-                // en boucle d'EBADF, et la session ne s'etablissait jamais. On l'accepte donc et on attend
-                // l'evenement de lecture, pour qu'une ecriture sur l'eventfd reveille quand meme le sondage,
-                // conformement a l'intention de gRPC ; aucun drapeau de sortie n'est pose.
+                // [Nextendo] A poll requesting NO read/write interest (InputEvents == 0) is VALID in POSIX:
+                // it blocks for the timeout and reports only POLLERR/POLLHUP. grpc-core polls its wakeup
+                // eventfd exactly this way while waiting for an async connect to complete. Rejecting it with
+                // EINVAL broke grpc's poll loop -> it closed the fd (EBADF loop) -> S3 NPLN never connected
+                // (stuck on the online ink-loading screen). Treat it as valid and wait on the read event so a
+                // wakeup (eventfd write) still unblocks the poll, matching grpc's intent; no output flags set.
                 if (evnt.Data.InputEvents == 0)
                 {
                     waiters.Add(socket.ReadEvent);
@@ -89,12 +88,11 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Bsd.Impl
 
                     if (socket.ReadEvent.WaitOne(0))
                     {
-                        // [Nextendo] Signaler la lisibilite pour un sondage Input ordinaire ET pour un
-                        // sondage a InputEvents == 0 : gRPC sonde son eventfd de reveil de cette seconde
-                        // maniere et attend un retour « pret » des qu'il ecrit dedans. Sans cette ligne, le
-                        // sondage restait differe indefiniment (jamais reveille) et la couche NPLN qui en
-                        // depend ne demarrait pas. Rapporter Input quand l'eventfd est lisible laisse le
-                        // reveil de gRPC aboutir.
+                        // [Nextendo] Report readability for a plain Input poll AND for an events==0 poll:
+                        // grpc-core polls its wakeup eventfd with InputEvents==0 and expects the poll to
+                        // return "ready" once it writes that eventfd. Without reporting it here, the grpc
+                        // poll deferred forever (never woke) -> S3's friends/presence flow (plaza gate) never
+                        // ran. Surfacing Input when the eventfd is readable lets grpc's wakeup complete.
                         if (evnt.Data.InputEvents.HasFlag(PollEventTypeMask.Input) || evnt.Data.InputEvents == 0)
                         {
                             outputEvents |= PollEventTypeMask.Input;

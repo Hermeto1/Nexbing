@@ -133,7 +133,7 @@ namespace Ryujinx.HLE.Loaders.Processes
             //
             // Une console cree ce stockage au premier lancement d'un titre qui le declare dans son NACP
             // (BcatDeliveryCacheStorageSize). Sans lui, un jeu qui emprunte le chemin BCAT moderne se
-            // fait refuser l'ouverture par LibHac - et le refus se presente comme 2002-6400
+            // fait refuser l'ouverture par LibHac — et le refus se presente comme 2002-6400
             // (PermissionDenied), pas comme « absent », ce qui rend la cause difficile a lire.
             // Splatoon 3 y buttait au demarrage : boucle de reessais toutes les demi-secondes, puis
             // erreur a l'ecran. Splatoon 2 passe par la commande heritee et ne rencontrait pas ce mur.

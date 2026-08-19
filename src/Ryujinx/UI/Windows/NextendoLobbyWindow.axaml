@@ -1,0 +1,375 @@
+<!-- [Nextendo] Fenêtre « Joueurs » : qui est avec moi maintenant, et qui j'ai
+     croisé récemment. Deux onglets plutôt que deux fenêtres — l'écran affiche
+     les mêmes choses (photo, pseudo, boutons), seule la source diffère.
+
+     Ce que le serveur envoie ne contient AUCUNE adresse IP : elle existe côté
+     serveur de jeu, mais l'endpoint ne lit que la liste des salons, qui n'en
+     porte pas. C'est ce qui permet de montrer un salon à un joueur sans
+     exposer où habitent les autres. -->
+<window:StyleableAppWindow xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:ext="using:Ryujinx.Ava.Common.Markup"
+             xmlns:helpers="using:Ryujinx.Ava.UI.Helpers"
+             xmlns:models="using:Ryujinx.Ava.UI.Models"
+             xmlns:window="clr-namespace:Ryujinx.Ava.UI.Windows"
+             mc:Ignorable="d"
+             Width="560"
+             Height="720"
+             MinWidth="480"
+             MinHeight="500"
+             x:Class="Ryujinx.Ava.UI.Windows.NextendoLobbyWindow">
+
+    <window:StyleableAppWindow.Styles>
+        <!-- Une ligne de motif se comporte comme un élément de liste cliquable :
+             elle occupe toute la largeur et s'éclaire au survol. On passe par une
+             classe et non par des attributs posés à la main, parce qu'une valeur
+             locale prime sur le thème et supprimerait justement le survol. -->
+        <Style Selector="Button.reason">
+            <Setter Property="Background" Value="#14808080" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="11,8" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Margin" Value="0,0,0,3" />
+        </Style>
+        <Style Selector="Button.reason:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#2E808080" />
+        </Style>
+    </window:StyleableAppWindow.Styles>
+
+    <Panel>
+        <Grid Margin="16,8,16,16" RowDefinitions="Auto,*,Auto">
+
+            <Border Grid.Row="0" Background="#14808080" CornerRadius="8" Padding="4">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button Name="TabLobbyButton" Click="TabLobby_Click"
+                            Padding="14,7" CornerRadius="6" BorderThickness="0"
+                            Content="{ext:Locale Dialog_Nextendo_LobbyTabCurrent}" />
+                    <Button Name="TabRecentButton" Click="TabRecent_Click"
+                            Padding="14,7" CornerRadius="6" BorderThickness="0"
+                            Content="{ext:Locale Dialog_Nextendo_LobbyTabRecent}" />
+                </StackPanel>
+            </Border>
+
+            <!-- ONGLET 1 : le salon en cours  -->
+            <Grid Grid.Row="1" Name="LobbyPanel" RowDefinitions="Auto,*">
+
+                <Border Grid.Row="0" Background="#1A808080" CornerRadius="8" Padding="12" Margin="0,8,0,0">
+                    <StackPanel Spacing="2">
+                        <TextBlock Name="LobbyGameText" FontWeight="SemiBold" FontSize="14" Text="—" />
+                        <TextBlock Name="LobbyStateText" FontSize="12" Opacity="0.75" Text="" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Hors salon : on invite plutôt que d'afficher une liste vide,
+                     qui laisserait croire à une panne. -->
+                <TextBlock Grid.Row="1" Name="NoLobbyText"
+                           Margin="0,24,0,0"
+                           HorizontalAlignment="Center"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           Opacity="0.7"
+                           Text="{ext:Locale Dialog_Nextendo_LobbyEmpty}" />
+
+                <ScrollViewer Grid.Row="1" Name="LobbyScroll" Margin="0,10,0,0">
+                    <ItemsControl Name="LobbyList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="models:NextendoLobbyPlayerModel">
+                                <Border Background="#14808080" CornerRadius="6" Padding="8" Margin="0,0,0,4">
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                                        <Border Grid.Column="0" Width="40" Height="40" CornerRadius="5"
+                                                ClipToBounds="True" Background="#33000000">
+                                            <Panel>
+                                                <TextBlock Text="{Binding Initial}"
+                                                           IsVisible="{Binding ShowInitial}"
+                                                           FontSize="18" FontWeight="Bold"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                           Opacity="0.75" />
+                                                <Image Source="{Binding Image, Converter={x:Static helpers:BitmapArrayValueConverter.Instance}}"
+                                                       IsVisible="{Binding HasImage}"
+                                                       Stretch="UniformToFill" />
+                                            </Panel>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Spacing="1">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                           Foreground="{Binding NameColor}" />
+                                                <Border IsVisible="{Binding ShowHostBadge}"
+                                                        Background="#33FFFFFF" CornerRadius="3" Padding="4,1">
+                                                    <TextBlock Text="{ext:Locale Dialog_Nextendo_LobbyHostBadge}"
+                                                               FontSize="10" Opacity="0.9" />
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding SeenLine}" FontSize="11" Opacity="0.6" />
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Click="AddFriend_Click" Tag="{Binding Pid}"
+                                                IsVisible="{Binding CanAct}"
+                                                Content="{ext:Locale Dialog_Nextendo_LobbyAddFriend}" />
+                                        <Button Grid.Column="3" Margin="6,0,0,0" Click="Report_Click" Tag="{Binding Pid}"
+                                                IsVisible="{Binding CanAct}"
+                                                Content="{ext:Locale Dialog_Nextendo_LobbyReport}" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- ONGLET 2 : les dernières rencontres  -->
+            <Grid Grid.Row="1" Name="RecentPanel" IsVisible="False" RowDefinitions="Auto,*">
+
+                <TextBlock Grid.Row="0" Margin="0,10,0,0" FontSize="12" Opacity="0.7"
+                           TextWrapping="Wrap"
+                           Text="{ext:Locale Dialog_Nextendo_RecentHint}" />
+
+                <TextBlock Grid.Row="1" Name="NoRecentText"
+                           Margin="0,24,0,0"
+                           HorizontalAlignment="Center"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           Opacity="0.7"
+                           Text="{ext:Locale Dialog_Nextendo_RecentEmpty}" />
+
+                <ScrollViewer Grid.Row="1" Name="RecentScroll" Margin="0,10,0,0">
+                    <ItemsControl Name="RecentList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="models:NextendoLobbyPlayerModel">
+                                <Border Background="#14808080" CornerRadius="6" Padding="8" Margin="0,0,0,4">
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                                        <Border Grid.Column="0" Width="40" Height="40" CornerRadius="5"
+                                                ClipToBounds="True" Background="#33000000">
+                                            <Panel>
+                                                <TextBlock Text="{Binding Initial}"
+                                                           IsVisible="{Binding ShowInitial}"
+                                                           FontSize="18" FontWeight="Bold"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                           Opacity="0.75" />
+                                                <Image Source="{Binding Image, Converter={x:Static helpers:BitmapArrayValueConverter.Instance}}"
+                                                       IsVisible="{Binding HasImage}"
+                                                       Stretch="UniformToFill" />
+                                            </Panel>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Spacing="1">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding SeenLine}" FontSize="11" Opacity="0.6" />
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Click="AddFriend_Click" Tag="{Binding Pid}"
+                                                IsVisible="{Binding CanAct}"
+                                                Content="{ext:Locale Dialog_Nextendo_LobbyAddFriend}" />
+                                        <Button Grid.Column="3" Margin="6,0,0,0" Click="Report_Click" Tag="{Binding Pid}"
+                                                IsVisible="{Binding CanAct}"
+                                                Content="{ext:Locale Dialog_Nextendo_LobbyReport}" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- Le retour des actions vit ICI et non dans la modale : quand un
+                 signalement part, la modale se ferme, et une confirmation affichée
+                 dans une fenêtre qui disparaît n'est jamais lue. L'ajout d'ami, lui,
+                 n'ouvre aucune modale et n'avait nulle part où répondre. -->
+            <TextBlock Grid.Row="2" Name="MainStatusText" Margin="0,10,0,0"
+                       FontSize="12" TextWrapping="Wrap" IsVisible="False" />
+        </Grid>
+
+        <!-- ================== MODALE DE SIGNALEMENT ==================
+             Une modale et non un panneau en bas de fenêtre : le signalement
+             demande de choisir, et une liste de huit motifs poussait le reste
+             de l'écran hors du cadre. Le voile sombre coupe aussi le contact
+             avec la liste, ce qui évite de signaler la mauvaise personne après
+             un rafraîchissement (la liste bouge toutes les cinq secondes).
+
+             Le voile est cliquable et referme : c'est le geste attendu, et une
+             modale sans sortie visible est un piège. -->
+        <Border Name="ReportOverlay" IsVisible="False" Background="#B3000000"
+                PointerPressed="ReportOverlay_PointerPressed">
+            <!-- La carte occupe toute la hauteur du voile plutôt qu'une hauteur fixe.
+                 Avec un MaxHeight arbitraire, la liste des motifs devait défiler alors
+                 que la fenêtre avait la place de tout montrer : une barre de défilement
+                 apparaissait pour rien. En s'étirant, la rangée étoilée absorbe l'espace
+                 disponible et la barre ne revient que si la fenêtre est vraiment trop
+                 petite. Les boutons, eux, restent ancrés en bas. -->
+            <Border Background="#FF1F1F23" CornerRadius="10" Margin="18"
+                    MaxWidth="470"
+                    VerticalAlignment="Stretch" HorizontalAlignment="Stretch">
+                <Grid Margin="18" RowDefinitions="Auto,Auto,Auto,*,Auto">
+
+                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Spacing="2">
+                            <TextBlock Name="ReportModalTitleText" FontSize="17" FontWeight="Bold"
+                                       Text="{ext:Locale Dialog_Nextendo_ReportModalTitle}" />
+                            <TextBlock Name="ReportModalSubtitleText" FontSize="12" Opacity="0.7"
+                                       TextWrapping="Wrap"
+                                       Text="{ext:Locale Dialog_Nextendo_ReportModalSubtitle}" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Name="ReportCloseButton" Click="ReportCancel_Click"
+                                Width="30" Height="30" Padding="0" CornerRadius="15"
+                                VerticalAlignment="Top"
+                                HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                Content="✕" />
+                    </Grid>
+
+                    <!-- Qui je signale. La carte reprend l'avatar et le pseudo déjà
+                         affichés dans la liste : on doit voir la personne au moment
+                         où on valide, pas se fier à sa mémoire. -->
+                    <Border Grid.Row="1" Margin="0,14,0,0" Background="#14808080" CornerRadius="6" Padding="10">
+                        <Grid ColumnDefinitions="Auto,*">
+                            <Border Grid.Column="0" Width="38" Height="38" CornerRadius="5"
+                                    ClipToBounds="True" Background="#33000000">
+                                <Panel>
+                                    <TextBlock Name="ReportInitialText" FontSize="17" FontWeight="Bold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Opacity="0.75" />
+                                    <Image Name="ReportAvatarImage" Stretch="UniformToFill" IsVisible="False" />
+                                </Panel>
+                            </Border>
+                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Spacing="1">
+                                <TextBlock Name="ReportTargetText" FontWeight="SemiBold" />
+                                <TextBlock Name="ReportTargetSubText" FontSize="11" Opacity="0.6" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Étape 2 : le motif retenu, rappelé pour qu'on sache ce qu'on envoie. -->
+                    <Border Grid.Row="2" Name="ReportChosenBox" IsVisible="False"
+                            Margin="0,10,0,0" Background="#1F3EA9FF" CornerRadius="6" Padding="10,8">
+                        <StackPanel Spacing="1">
+                            <TextBlock Name="ReportChosenText" FontWeight="SemiBold" FontSize="13" />
+                            <TextBlock Name="ReportChosenDescText" FontSize="11" Opacity="0.75" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Étape 1 : le choix du motif. -->
+                    <ScrollViewer Grid.Row="3" Name="ReportReasonScroll" Margin="0,12,0,0"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <Button Classes="reason" Tag="cheating" Click="ReportReason_Click">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="1">
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonCheating}" />
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonCheatingDesc}"
+                                                   FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="›" FontSize="18" Opacity="0.5"
+                                               VerticalAlignment="Center" Margin="8,0,0,0" />
+                                </Grid>
+                            </Button>
+
+                            <Button Classes="reason" Tag="name" Click="ReportReason_Click">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="1">
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonName}" />
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonNameDesc}"
+                                                   FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="›" FontSize="18" Opacity="0.5"
+                                               VerticalAlignment="Center" Margin="8,0,0,0" />
+                                </Grid>
+                            </Button>
+
+                            <Button Classes="reason" Tag="name_mismatch" Click="ReportReason_Click">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="1">
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonNameMismatch}" />
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonNameMismatchDesc}"
+                                                   FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="›" FontSize="18" Opacity="0.5"
+                                               VerticalAlignment="Center" Margin="8,0,0,0" />
+                                </Grid>
+                            </Button>
+
+                            <Button Classes="reason" Tag="avatar" Click="ReportReason_Click">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="1">
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonAvatar}" />
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonAvatarDesc}"
+                                                   FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="›" FontSize="18" Opacity="0.5"
+                                               VerticalAlignment="Center" Margin="8,0,0,0" />
+                                </Grid>
+                            </Button>
+
+                            <Button Classes="reason" Tag="harassment" Click="ReportReason_Click">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="1">
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonHarassment}" />
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonHarassmentDesc}"
+                                                   FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="›" FontSize="18" Opacity="0.5"
+                                               VerticalAlignment="Center" Margin="8,0,0,0" />
+                                </Grid>
+                            </Button>
+
+                            <Button Classes="reason" Tag="griefing" Click="ReportReason_Click">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="1">
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonGriefing}" />
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonGriefingDesc}"
+                                                   FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="›" FontSize="18" Opacity="0.5"
+                                               VerticalAlignment="Center" Margin="8,0,0,0" />
+                                </Grid>
+                            </Button>
+
+                            <Button Classes="reason" Tag="impersonation" Click="ReportReason_Click">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="1">
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonImpersonation}" />
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonImpersonationDesc}"
+                                                   FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="›" FontSize="18" Opacity="0.5"
+                                               VerticalAlignment="Center" Margin="8,0,0,0" />
+                                </Grid>
+                            </Button>
+
+                            <Button Classes="reason" Tag="other" Click="ReportReason_Click">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="1">
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonOther}" />
+                                        <TextBlock Text="{ext:Locale Dialog_Nextendo_ReportReasonOtherDesc}"
+                                                   FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="›" FontSize="18" Opacity="0.5"
+                                               VerticalAlignment="Center" Margin="8,0,0,0" />
+                                </Grid>
+                            </Button>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- Étape 2 : la précision libre. -->
+                    <StackPanel Grid.Row="3" Name="ReportCommentArea" IsVisible="False"
+                                Margin="0,12,0,0" Spacing="6" VerticalAlignment="Top">
+                        <TextBlock FontSize="12" Opacity="0.75" TextWrapping="Wrap"
+                                   Text="{ext:Locale Dialog_Nextendo_ReportCommentLead}" />
+                        <TextBox Name="ReportCommentBox" AcceptsReturn="True" TextWrapping="Wrap"
+                                 Height="110" MaxLength="1000" />
+                    </StackPanel>
+
+                    <Grid Grid.Row="4" Margin="0,12,0,0" ColumnDefinitions="*,Auto,Auto">
+                        <TextBlock Grid.Column="0" Name="StatusText" VerticalAlignment="Center"
+                                   FontSize="12" TextWrapping="Wrap" IsVisible="False" />
+                        <Button Grid.Column="1" Name="ReportBackButton" Margin="0,0,8,0"
+                                Click="ReportBack_Click" IsVisible="False"
+                                Content="{ext:Locale Dialog_Nextendo_ReportBack}" />
+                        <Button Grid.Column="2" Name="ReportSendButton" Classes="accent"
+                                Click="ReportSend_Click" IsVisible="False"
+                                Content="{ext:Locale Dialog_Nextendo_ReportSend}" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Border>
+    </Panel>
+</window:StyleableAppWindow>

@@ -141,16 +141,8 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
             {
                 LibHac.Result bcatResult = hos.Fs.EnsureApplicationBcatDeliveryCacheStorage(out long bcatSize, applicationId, in nacp);
 
-                if (bcatResult.IsSuccess())
-                {
-                    Logger.Info?.Print(LogClass.ServiceAm,
-                        $"[Nextendo] cache de livraison BCAT pret pour {applicationId.Value:X16} ({bcatSize} octets).");
-                }
-                else
-                {
-                    Logger.Warning?.Print(LogClass.ServiceAm,
-                        $"[Nextendo] cache de livraison BCAT indisponible pour {applicationId.Value:X16} : echec 0x{bcatResult.Value:X}.");
-                }
+                Logger.Info?.Print(LogClass.ServiceAm,
+                    $"[Nextendo] cache de livraison BCAT du titre {applicationId.Value:X16} : {(bcatResult.IsSuccess() ? "pret" : $"echec 0x{bcatResult.Value:X}")} ({bcatSize} octets demandes)");
             }
 
             context.ResponseData.Write(requiredSize);

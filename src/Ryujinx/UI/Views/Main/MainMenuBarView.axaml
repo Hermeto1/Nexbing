@@ -224,6 +224,14 @@
                     Header="{ext:Locale Dialog_Nextendo_MenuBarFriends}"
                     InputGesture="Ctrl+F"
                     Icon="{ext:Icon fa-solid fa-user-group}" />
+                <MenuItem
+                    Name="NextendoLobbyMenuItem"
+                    Header="{ext:Locale Dialog_Nextendo_MenuBarLobby}"
+                    Icon="{ext:Icon fa-solid fa-users-viewfinder}" />
+                <MenuItem
+                    Name="NextendoRecentMenuItem"
+                    Header="{ext:Locale Dialog_Nextendo_MenuBarRecent}"
+                    Icon="{ext:Icon fa-solid fa-clock-rotate-left}" />
                 <Separator />
                 <MenuItem
                     Name="NextendoReportMenuItem"

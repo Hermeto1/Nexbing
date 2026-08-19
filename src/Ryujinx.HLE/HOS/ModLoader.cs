@@ -56,7 +56,20 @@ namespace Ryujinx.HLE.HOS
         public const ulong Splatoon3ApplicationId = 0x0100C2500FC20000;
 
         /// <summary>Vrai si ce titre refuse tout mod (Splatoon 3 : test en ligne sans triche).</summary>
-        public static bool ModsInterdits(ulong applicationId) => applicationId == Splatoon3ApplicationId;
+        /// <summary>
+        /// L'interdiction ne vaut que sur NOS serveurs : elle existe parce que Splatoon 3 s'y
+        /// joue contre de vraies personnes et qu'un seul mod de jeu gâcherait leur partie. En
+        /// mode « serveur personnalisé », l'émulateur ne parle plus à Nextendo du tout, et la
+        /// politique d'un serveur privé n'est pas la nôtre à faire respecter.
+        /// </summary>
+        /// ⚠️ La condition est <see cref="NextendoServerOverride.IsActive"/>, PAS
+        /// <c>HorsNextendo</c>. HorsNextendo est vrai dès que la case est cochée, même sans
+        /// adresse valide — et dans ce cas la redirection retombe sur nos serveurs. Se fier à
+        /// HorsNextendo laissait donc jouer moddé SUR NOS SERVEURS PUBLICS, en éditant à la main
+        /// un fichier JSON pour cocher la case sans rien remplir. IsActive exige une adresse
+        /// utilisable, donc un trafic qui part réellement ailleurs.
+        public static bool ModsInterdits(ulong applicationId) =>
+            applicationId == Splatoon3ApplicationId && !NextendoServerOverride.IsActive;
 
         /// <summary>
         /// Noms des mods trouves sur le disque pour un titre qui les refuse, et donc IGNORES.
@@ -74,6 +87,17 @@ namespace Ryujinx.HLE.HOS
         /// Sert a prevenir le joueur AVANT le lancement : la collecte, elle, n'a lieu qu'au
         /// chargement du programme, trop tard pour afficher un message utile.
         /// </summary>
+        /// <remarks>
+        /// Rend le CHEMIN COMPLET du dossier, pas son nom.
+        ///
+        /// Un mod peut etre pose de deux facons : dans son propre dossier
+        /// (contents/&lt;titre&gt;/MonMod/exefs) ou a plat, directement a la racine du titre
+        /// (contents/&lt;titre&gt;/exefs). Dans le second cas le nom vaut « exefs » ou « romfs » —
+        /// c'est un type de contenu, pas un nom de mod, et le message affichait donc « exefs »
+        /// tout court. Un joueur qui ne se souvient pas d'avoir installe quoi que ce soit y lit
+        /// une accusation incomprehensible, et n'a aucun moyen de retrouver le dossier fautif.
+        /// Le chemin, lui, se lit et s'ouvre.
+        /// </remarks>
         public static List<string> ModsInstallesPour(ulong applicationId)
         {
             List<string> trouves = [];
@@ -94,9 +118,9 @@ namespace Ryujinx.HLE.HOS
 
                 foreach (DirectoryInfo mod in dossierDuJeu.EnumerateDirectories())
                 {
-                    if (mod.EnumerateFileSystemInfos().Any() && !trouves.Contains(mod.Name))
+                    if (mod.EnumerateFileSystemInfos().Any() && !trouves.Contains(mod.FullName))
                     {
-                        trouves.Add(mod.Name);
+                        trouves.Add(mod.FullName);
                     }
                 }
             }

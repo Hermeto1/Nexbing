@@ -1,3 +1,4 @@
+using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using Ryujinx.HLE.HOS.Services.Sockets.Nsd;
 using System;
@@ -145,6 +146,10 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Sfdnsres.Proxy
         private static readonly (string Pattern, IPAddress Address)[] _builtinRedirects =
         {
             ("nncs2-*.n.n.srv.nintendo.net", ResolveConfiguredIp("NEXTENDO_NAT_IP")),
+            // Le serveur NEX de Mario Kart 8 Deluxe vit sur la meme machine que le
+            // repondeur NAT ; il partage donc sa variable. Pose AVANT les jokers, sinon
+            // *.nintendo.net l attraperait en premier.
+            ("g2b309e01-lp1.s.n.srv.nintendo.net", ResolveConfiguredIp("NEXTENDO_NAT_IP")),
             ("*.nintendo.net",     ResolveConfiguredIp("NEXTENDO_SERVER_IP")),
             ("*.nintendo.com",     ResolveConfiguredIp("NEXTENDO_SERVER_IP")),
             ("*.nintendowifi.net", ResolveConfiguredIp("NEXTENDO_SERVER_IP")),
@@ -167,13 +172,37 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Sfdnsres.Proxy
             return address;
         }
 
+
+        /// <summary>
+        /// [Nextendo] Mode « serveur personnalise » : detourne la redirection vers le serveur du
+        /// joueur au lieu du notre.
+        ///
+        /// Le controle NAT exige DEUX adresses publiques distinctes ; la regle nncs recoit donc
+        /// la seconde adresse saisie, les autres la premiere. Si une adresse manque, on garde
+        /// celle du build plutot que de dupliquer l autre : deux repondeurs a la meme adresse
+        /// font echouer le controle NAT en silence.
+        /// </summary>
+        private static IPAddress Substituer(string pattern, IPAddress configuree)
+        {
+            if (!NextendoServerOverride.IsActive)
+            {
+                return configuree;
+            }
+
+            if (pattern.StartsWith("nncs", StringComparison.OrdinalIgnoreCase))
+            {
+                return NextendoServerOverride.NatAddress ?? configuree;
+            }
+
+            return NextendoServerOverride.ServerAddress ?? configuree;
+        }
         private static bool TryMatchBuiltin(string host, out IPAddress address)
         {
             foreach ((string pattern, IPAddress addr) in _builtinRedirects)
             {
                 if (FileSystemName.MatchesSimpleExpression(pattern, host))
                 {
-                    address = addr;
+                    address = Substituer(pattern, addr);
 
                     return true;
                 }

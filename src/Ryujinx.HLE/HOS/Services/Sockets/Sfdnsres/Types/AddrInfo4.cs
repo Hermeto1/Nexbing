@@ -18,7 +18,7 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Sfdnsres.Types
     // byte-swaps them once. So the wire bytes must be HOST-order (the value read little-endian), NOT
     // network order. The original code already produced host-order bytes (ctor HostToNetworkOrder + a
     // second swap in ToNetworkOrder); do NOT "fix" that to network order (that made grpc connect to the
-    // byte-reversed 194.29.178.51:47873 and the game crashed). Only sin_len needed correcting.
+    // address with its four bytes reversed, and the game crashed). Only sin_len needed correcting.
     [StructLayout(LayoutKind.Sequential, Pack = 1, Size = 0x10)]
     struct AddrInfo4
     {

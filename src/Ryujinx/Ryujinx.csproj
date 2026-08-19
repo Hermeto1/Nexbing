@@ -27,6 +27,19 @@
     <TrimmerSingleWarn>false</TrimmerSingleWarn>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>partial</TrimMode>
+
+    <!--
+      [Nextendo] Le trimmer REEMET les assemblages qu'il retaille (HarfBuzzSharp, SkiaSharp...) en
+      recopiant dans leur repertoire de debogage le chemin du .pdb de l'obj qui les a produits. Ce
+      chemin est celui de la machine de build, en clair dans le binaire publie : jusqu'a la 1.7.6,
+      chaque release Windows et Linux portait le nom d'utilisateur et l'arborescence de travail de
+      celui qui l'avait compilee. Rien n'exploite cela, mais rien ne justifie non plus de le livrer.
+      Ce reglage supprime ces repertoires de debogage a la reemission.
+
+      Restent deux chemins que nous ne produisons pas : ceux de Gommon et d'OpenTK, deja presents
+      dans les paquets NuGet tels que leurs auteurs les publient.
+    -->
+    <TrimmerRemoveSymbols>true</TrimmerRemoveSymbols>
   </PropertyGroup>
   
   <!--

@@ -1,4 +1,4 @@
-using DynamicData;
+﻿using DynamicData;
 using DynamicData.Kernel;
 using Gommon;
 using LibHac.Common;
@@ -741,10 +741,15 @@ namespace Ryujinx.Ava.Systems.AppLibrary
 
                     try
                     {
+                        // [Nextendo] Meme bornage que les deux autres balayages : voir le commentaire
+                        // detaille plus bas. Sans limite, un point de jonction qui boucle suffit a faire
+                        // deborder la pile au demarrage.
                         EnumerationOptions options = new()
                         {
                             RecurseSubdirectories = true,
-                            IgnoreInaccessible = false
+                            MaxRecursionDepth = 16,
+                            IgnoreInaccessible = true,
+                            AttributesToSkip = FileAttributes.ReparsePoint,
                         };
 
                         IEnumerable<string> files = Directory.EnumerateFiles(appDir, "*", options)
@@ -940,10 +945,21 @@ namespace Ryujinx.Ava.Systems.AppLibrary
 
                     try
                     {
+                        // [Nextendo] Bornage du parcours de dossiers.
+                        //
+                        // Le parcours n'avait aucune limite : profondeur infinie, points de jonction suivis
+                        // comme de vrais dossiers — donc un lien qui pointe vers un parent boucle — et la
+                        // moindre entree illisible levait une exception au lieu d'etre ignoree. Lache sur un
+                        // dossier Downloads entier, c'est fragile.
+                        //
+                        // On borne : seize niveaux suffisent tres largement pour une arborescence de jeux, on
+                        // saute les points de reanalyse, et une entree illisible est ignoree plutot que fatale.
                         EnumerationOptions options = new()
                         {
                             RecurseSubdirectories = true,
-                            IgnoreInaccessible = false,
+                            MaxRecursionDepth = 16,
+                            IgnoreInaccessible = true,
+                            AttributesToSkip = FileAttributes.ReparsePoint,
                         };
 
                         IEnumerable<string> files = Directory.EnumerateFiles(appDir, "*", options).Where(
@@ -1056,10 +1072,15 @@ namespace Ryujinx.Ava.Systems.AppLibrary
 
                     try
                     {
+                        // [Nextendo] Meme bornage que les deux autres balayages : voir le commentaire
+                        // detaille plus bas. Sans limite, un point de jonction qui boucle suffit a faire
+                        // deborder la pile au demarrage.
                         EnumerationOptions options = new()
                         {
                             RecurseSubdirectories = true,
-                            IgnoreInaccessible = false,
+                            MaxRecursionDepth = 16,
+                            IgnoreInaccessible = true,
+                            AttributesToSkip = FileAttributes.ReparsePoint,
                         };
 
                         IEnumerable<string> files = Directory.EnumerateFiles(appDir, "*", options).Where(

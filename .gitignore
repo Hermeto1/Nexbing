@@ -188,3 +188,7 @@ PublishProfiles/
 # Ignore distribution build files
 distribution/macos/temp/
 distribution/macos/output/
+
+# Sorties de publication locales : un build de release y bake l'adresse du serveur.
+# Sans cette regle, un « git add -A » la commiterait.
+publish-*/

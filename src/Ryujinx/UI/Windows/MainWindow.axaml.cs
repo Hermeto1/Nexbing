@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -144,6 +144,13 @@ namespace Ryujinx.Ava.UI.Windows
             // [Nextendo] Wire the Switch-style in-game toast overlay (a separate transparent, topmost,
             // click-through window — the game render is a native surface that paints over Avalonia).
             NextendoNotificationOverlayWindow.Attach(this);
+
+            // [Nextendo] L'historique ne partait qu'a la fin d'un jeu ou a la fermeture de la
+            // fenetre : un emulateur tue ou plante n'envoyait donc rien, et une longue session
+            // n'arrivait sur le compte qu'apres coup. Mesure du 2026-08-23 : un compte ayant joue
+            // plusieurs sessions avait encore, cote serveur, un historique vieux de trois jours.
+            // La poussee periodique n'envoie que ce qui a bouge, sans les icones deja connues.
+            Ryujinx.Ava.Common.NextendoHistorySync.DemarrerPousseePeriodique();
 
             Executor.ExecuteBackgroundAsync(async () =>
             {
@@ -718,6 +725,7 @@ namespace Ryujinx.Ava.UI.Windows
                         // Awaited before Close() so they finish before the process exits.
                         await ViewModel.FlushNextendoSaveAsync();
                         await Ryujinx.Ava.Common.NextendoHistorySync.PushAsync("window-close");
+                        Ryujinx.Ava.Common.NextendoHistorySync.ArreterPousseePeriodique();
 
                         Close();
                     });

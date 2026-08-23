@@ -1,4 +1,4 @@
-using Ryujinx.Common.Configuration;
+﻿using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using Ryujinx.Common.Memory;
 using Ryujinx.Horizon.Common;
@@ -167,7 +167,13 @@ namespace Ryujinx.Horizon.Sdk.Friends.Detail.Ipc
                     // ici des fiches estampillees d'un PID qu'il ne sait pas rapprocher de la liste
                     // que NPLN lui a donnee. Les autres jeux gardent le PID.
                     ulong lid = wantNsa && friends[i].Nsa != 0 ? friends[i].Nsa : friends[i].Pid;
-                    friendList[i] = MakeNextendoFriend(lid, friends[i].Name, PresenceStatus.OnlinePlay, friends[i].AppField);
+                    // Presence REELLE, comme le fait deja UpdateFriendInfo plus bas. Annoncer
+                    // TOUT LE MONDE « en train de jouer a ce jeu » est un mensonge que le jeu
+                    // peut verifier : il demande ensuite au serveur la session de chacun de ces
+                    // pretendus joueurs, n'en retrouve aucune, et ecarte l'entree.
+                    PresenceStatus st = friends[i].Status > 0 ? PresenceStatus.OnlinePlay : PresenceStatus.Offline;
+                    friendList[i] = MakeNextendoFriend(lid, friends[i].Name, st, friends[i].AppField,
+                        sameApp: friends[i].Status > 0);
                 }
                 count = n;
 
@@ -245,7 +251,52 @@ namespace Ryujinx.Horizon.Sdk.Friends.Detail.Ipc
         {
             size = 0;
 
-            Logger.Stub?.PrintStub(LogClass.ServiceFriend, new { userId, friendId });
+            // [Nextendo] La photo de profil de l'ami. Cette methode rendait size=0 : la liste
+            // s'affichait avec les vrais pseudos mais une vignette « ? » pour chacun. L'ami est
+            // nomme ici par le MEME identifiant que dans la liste (NSA pour Splatoon 3, PID
+            // ailleurs) ; c'est le PID qui adresse /api/avatar, d'ou la resolution.
+            ulong wanted = friendId.Id;
+            ulong pid = 0;
+
+            foreach (NextendoFriends.Entry e in NextendoFriends.Get())
+            {
+                if ((e.Nsa != 0 && e.Nsa == wanted) || e.Pid == wanted)
+                {
+                    pid = e.Pid;
+
+                    break;
+                }
+            }
+
+            if (pid == 0)
+            {
+                Logger.Info?.Print(LogClass.ServiceFriend, $"[Nextendo] GetFriendProfileImage 0x{wanted:x} -> ami inconnu");
+
+                return Result.Success;
+            }
+
+            // Le jeu ne redemande pas : une attente courte vaut mieux qu'une vignette vide definitive.
+            byte[] jpeg = NextendoFriends.ProfileImageWarm(pid, 1500);
+
+            if (jpeg == null || jpeg.Length == 0)
+            {
+                Logger.Info?.Print(LogClass.ServiceFriend, $"[Nextendo] GetFriendProfileImage pid={pid} -> pas d'image");
+
+                return Result.Success;
+            }
+
+            if (jpeg.Length > profileImage.Length)
+            {
+                Logger.Info?.Print(LogClass.ServiceFriend,
+                    $"[Nextendo] GetFriendProfileImage pid={pid} -> {jpeg.Length} o > tampon {profileImage.Length} o, ignoree");
+
+                return Result.Success;
+            }
+
+            jpeg.CopyTo(profileImage);
+            size = jpeg.Length;
+
+            Logger.Info?.Print(LogClass.ServiceFriend, $"[Nextendo] GetFriendProfileImage pid={pid} -> {size} o (JPEG)");
 
             return Result.Success;
         }

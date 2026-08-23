@@ -20,6 +20,8 @@ using Ryujinx.HLE.Loaders.Executables;
 using Ryujinx.Horizon.Common;
 using Ryujinx.Horizon.Sdk.Arp;
 using System;
+using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using ApplicationId = LibHac.Ncm.ApplicationId;
 
@@ -289,6 +291,39 @@ namespace Ryujinx.HLE.Loaders.Processes
                     NroExecutable nro => Convert.ToHexString(nro.Header.BuildId),
                     _ => string.Empty
                 }).ToUpper();
+            }
+
+            // [Nextendo] NOMMER l'identifiant de build de chaque executable charge.
+            //
+            // C'est la cle qui indexe les correctifs integres (contournement de certificat, nom de
+            // pair) : NextendoS3Patches les range par build, et un build inconnu passe en SILENCE —
+            // aucun correctif applique, aucun message. A chaque mise a jour du jeu l'identifiant
+            // change, et sans cette ligne il faut dechiffrer le NCA pour le relever.
+            Logger.Notice.Print(LogClass.Loader,
+                $"[Nextendo] identifiant(s) de build : {string.Join(", ", buildIds.Where(b => !string.IsNullOrEmpty(b)))}");
+
+            // [Nextendo] OUTIL DE PORTAGE DES CORRECTIFS. Vider l'image decompressee de chaque
+            // executable quand NEXTENDO_DUMP_NSO pointe un dossier. Sans cela, porter un correctif
+            // d'une version a l'autre imposerait de dechiffrer le NCA a la main : ici l'emulateur a
+            // deja tout fait. Les offsets d'un .ips se comptent sur le FICHIER NSO, donc 0x100 de
+            // plus que dans cette image (l'en-tete n'y figure pas) — c'est le meme decalage que
+            // MemPatch.Patch applique.
+            string dossierVidage = Environment.GetEnvironmentVariable("NEXTENDO_DUMP_NSO");
+            if (!string.IsNullOrEmpty(dossierVidage))
+            {
+                System.IO.Directory.CreateDirectory(dossierVidage);
+                for (int i = 0; i < executables.Length; i++)
+                {
+                    if (string.IsNullOrEmpty(buildIds[i]))
+                    {
+                        continue;
+                    }
+
+                    string chemin = System.IO.Path.Combine(dossierVidage, $"{buildIds[i].TrimEnd('0')}.bin");
+                    System.IO.File.WriteAllBytes(chemin, executables[i].Program);
+                    Logger.Notice.Print(LogClass.Loader,
+                        $"[Nextendo] image ecrite : {chemin} ({executables[i].Program.Length} o)");
+                }
             }
 
             ulong[] nsoBase = new ulong[executables.Length];

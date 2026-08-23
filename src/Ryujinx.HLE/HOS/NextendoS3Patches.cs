@@ -58,6 +58,18 @@ namespace Ryujinx.HLE.HOS
         private static readonly Dictionary<string, byte[][]> _parIdentifiantDeBuild = new()
         {
             ["6830B3A12406CB4716FEC5ADDC35D3E2DC92D212"] = [_contournementCertificat, _nomDePair],
+
+            // 11.3.0. Les TROIS sites sont aux MEMES offsets qu'en 11.2.0 — les memes octets IPS
+            // conviennent donc mot pour mot. Verifie le 2026-08-20 en comparant les images
+            // decompressees des deux versions (NEXTENDO_DUMP_NSO) :
+            //
+            //   0x00157B20  LDRB W10,[X21,#0x38]  (AA E2 40 39) -> MOV W10,#1    — signature de 64 o
+            //                                                                      UNIQUE dans 100 Mo
+            //   0x0014E1B0  CBZ  W0,+88           (C0 02 00 34) -> NOP
+            //   0x0014DD80  MOV  W20,W0           (F4 03 00 2A) -> MOV W20,WZR
+            //
+            // Aucun decalage : la croissance de 4096 octets du binaire est situee APRES ces sites.
+            ["28C4287AEE36F7499DA60F3E68B54C70DA382D75"] = [_contournementCertificat, _nomDePair],
             ["726D2B882DD9EF10F4A9D73EED088740630FB6C8"] = [_contournementCertificat],
         };
 

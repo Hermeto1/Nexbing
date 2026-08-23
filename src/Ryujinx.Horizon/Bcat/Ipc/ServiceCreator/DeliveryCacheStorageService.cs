@@ -60,7 +60,28 @@ namespace Ryujinx.Horizon.Bcat.Ipc
         [CmifCommand(10)]
         public Result EnumerateDeliveryCacheDirectory(out int count, [Buffer(HipcBufferFlags.Out | HipcBufferFlags.MapAlias)] Span<DirectoryName> directoryNames)
         {
-            return _libHacService.Get.EnumerateDeliveryCacheDirectory(out count, directoryNames).Horizon;
+            LibHac.Result res = _libHacService.Get.EnumerateDeliveryCacheDirectory(out count, directoryNames);
+
+            // Le cache de livraison reel est toujours vide sous Ryujinx : rien ne le remplit. Un jeu
+            // qui commence par DEMANDER LA LISTE des dossiers en trouve donc zero, et n'ouvre jamais
+            // celui qu'il cherche — le repli de DeliveryCacheDirectoryService.Open, lui, ne se
+            // declenche qu'a l'ouverture, donc trop tard. On complete ici avec ce que porte
+            // reellement le dossier bcat-seed.
+            if (count == 0 && System.IO.Directory.Exists(BcatSeed.Root))
+            {
+                string[] dirs = System.IO.Directory.GetDirectories(BcatSeed.Root);
+                int n = System.Math.Min(dirs.Length, directoryNames.Length);
+                for (int i = 0; i < n; i++)
+                {
+                    DirectoryName dn = default;
+                    BcatSeed.FillName(ref dn, new System.IO.DirectoryInfo(dirs[i]).Name);
+                    directoryNames[i] = dn;
+                }
+                count = n;
+                res = LibHac.Result.Success;
+            }
+
+            return res.Horizon;
         }
 
         public void Dispose()

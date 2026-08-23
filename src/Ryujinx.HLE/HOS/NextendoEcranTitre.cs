@@ -88,6 +88,12 @@ namespace Ryujinx.HLE.HOS
             }
 
             string logo = LogoDemande();
+
+            // Une ligne a chaque demarrage de S3, meme quand il n'y a rien a faire : sans elle, on
+            // ne distingue pas « rien n'a ete demande » de « le chemin n'a pas ete emprunte ».
+            Logger.Info?.Print(LogClass.ModLoader,
+                $"[Nextendo] Ecran-titre : demande={Demande ?? "(rien)"} env={Environment.GetEnvironmentVariable("NEXTENDO_LOGO_TITRE") ?? "(rien)"} -> {logo ?? "aucune permutation"}");
+
             if (logo == null)
             {
                 return baseStorage;

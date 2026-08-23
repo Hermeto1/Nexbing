@@ -341,6 +341,8 @@ namespace Ryujinx.Ava.Systems.AppLibrary
             "0100dca0064a6000" => "1.4.0",  // Luigi's Mansion 3
             "0100c2500fc20000" => "11.2.0", // Splatoon 3
             "01006bd001e06000" => "1.0.17", // Minecraft: Nintendo Switch Edition
+            "01009b500007c000" => "5.5.1",  // ARMS
+            "0100bde00862a000" => "3.1.1",  // Mario Tennis Aces
             _ => "",
         };
 

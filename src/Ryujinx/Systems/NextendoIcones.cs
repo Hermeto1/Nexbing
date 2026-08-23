@@ -48,6 +48,8 @@ namespace Ryujinx.Ava.Systems
                     or "0100dca0064a6000"                                       // Luigi's Mansion 3
                     or "0100c2500fc20000"                                       // Splatoon 3
                     or "01006bd001e06000"                                       // Minecraft
+                    or "01009b500007c000"                                       // ARMS
+                    or "0100bde00862a000"                                       // Mario Tennis Aces
                     => true,
                 _ => false,
             };
@@ -86,10 +88,11 @@ namespace Ryujinx.Ava.Systems
                     => Amont + "1303889283886743672.png",               // Splatoon 2 (EU/US/JP)
                 "01006f8002326000" => Amont + "1504264568413880352.png", // Animal Crossing: New Horizons
                 "0100dca0064a6000" => Amont + "1294777186720677953.png", // Luigi's Mansion 3
+                "0100bde00862a000" => Amont + "1298165266550882344.png", // Mario Tennis Aces
 
-                // Minecraft : absent du CDN amont ET sans dump ici. Il retombe donc sur la
-                // marque Nextendo, ce qui est préférable à une URL qui répondrait 404 —
-                // Discord n'affiche alors aucune image du tout.
+                // Minecraft et ARMS : absents du CDN amont ET sans dump ici. Ils retombent
+                // donc sur la marque Nextendo, ce qui est préférable à une URL qui répondrait
+                // 404 — Discord n'affiche alors aucune image du tout.
                 _ => "",
             };
         }

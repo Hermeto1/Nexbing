@@ -376,6 +376,36 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Sfdnsres.Proxy
                 };
             }
 
+            // [Nextendo] Mario Tennis Aces (NEX server id g23932a00) resolves through a real
+            // GeoDNS hostname instead of the fixed NEXTENDO_SERVER_IP, so players get routed to
+            // whichever of the two live Tennis nodes is actually closest to them. Every other
+            // title is unaffected -- the second node doesn't run their servers.
+            // NEXTENDO_TENNIS_GEODNS=0 disables this and falls through to the normal built-in
+            // redirect below. Falls through the same way on any resolution failure (GeoDNS
+            // server unreachable, etc.) rather than failing the connection outright.
+            if (host.Contains("g23932a00", StringComparison.OrdinalIgnoreCase) &&
+                Environment.GetEnvironmentVariable("NEXTENDO_TENNIS_GEODNS") != "0")
+            {
+                try
+                {
+                    IPHostEntry geoEntry = Dns.GetHostEntry("tennis-geo.nextendo.network");
+
+                    Logger.Debug?.PrintMsg(LogClass.ServiceBsd, $"Redirecting '{host}' to: {geoEntry.AddressList[0]} (Tennis GeoDNS)");
+                    LastHostForIp[geoEntry.AddressList[0].ToString()] = host;
+
+                    return new IPHostEntry
+                    {
+                        AddressList = geoEntry.AddressList,
+                        HostName = host,
+                        Aliases = [],
+                    };
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning?.PrintMsg(LogClass.ServiceBsd, $"Tennis GeoDNS lookup failed, falling back to fixed IP: {ex.Message}");
+                }
+            }
+
             // [Nextendo] Built-in ordered rules take precedence (deterministic; most
             // specific first) so the wildcard can never swallow the nncs2 NAT-check host.
             if (TryMatchBuiltin(host, out IPAddress builtinAddress))

@@ -3,4 +3,28 @@
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>preview</LangVersion>
   </PropertyGroup>
+
+  <!--
+    En Release, aucun symbole de debogage.
+
+    ⚠️ CE N'EST PAS UNE OPTIMISATION, C'EST UNE FUITE QU'ON FERME. Sans ce reglage, chaque projet
+    emet un fichier de symboles et grave son chemin dans une entree RSDS ; le fichier unique produit
+    par la publication les emporte toutes. Mesure du 2026-08-24, en republiant la 1.7.9 : trente
+    occurrences du chemin complet du depot sur la machine de compilation se retrouvaient dans
+    l'executable, c'est-a-dire l'arborescence de cette machine offerte a quiconque telecharge.
+
+    Le binaire 1.7.9 reellement publie, lui, n'en porte aucune : les seules entrees RSDS qui y
+    subsistent viennent du runtime .NET de Microsoft et ne nous appartiennent pas.
+
+    Le passer en ligne de commande ne suffit pas : la propriete ne vaudrait que pour le projet
+    Ryujinx, pas pour la trentaine de projets qu'il reference et dont les symboles finissent
+    pourtant dans le meme fichier unique. Elle vit donc ici, ou tout l'arbre en herite.
+
+    La documentation de passation affirmait deja que ce fichier forcait DebugType=none. Il ne le
+    faisait pas.
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
 </Project>

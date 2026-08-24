@@ -58,6 +58,19 @@ namespace Ryujinx.HLE.HOS
         /// famille ; les atteindre demandera d'encoder l'image, pas de permuter des octets, et le
         /// controle de taille ci-dessous les refusera proprement en attendant.
         /// </summary>
+        /// <summary>
+        /// Les logos qu'on APPORTE, faute d'exister dans le jeu. LoveFest est un dessin de Zara :
+        /// il est encode en BC7 a la taille exacte de l'emplacement — seize octets par bloc de 4x4,
+        /// comme l'ASTC qu'il remplace — et le champ de format du BRTI est bascule en consequence.
+        /// Meme geometrie, meme reserve, donc le fichier decompresse ne bouge pas.
+        /// </summary>
+        private static readonly Dictionary<string, string> _apportes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["lovefest"] = "lovefest",
+        };
+
+        private const uint Bc7Srgb = 0x2006;
+
         private static readonly Dictionary<string, string> _variantes = new(StringComparer.OrdinalIgnoreCase)
         {
             ["splatoween"] = "Logo_02",
@@ -89,7 +102,14 @@ namespace Ryujinx.HLE.HOS
                 return null;
             }
 
-            return _variantes.TryGetValue(cle.Trim(), out string logo) ? logo : null;
+            cle = cle.Trim();
+
+            if (_apportes.ContainsKey(cle))
+            {
+                return cle;
+            }
+
+            return _variantes.TryGetValue(cle, out string logo) ? logo : null;
         }
 
         public static IStorage Appliquer(ulong applicationId, IStorage baseStorage)
@@ -158,7 +178,12 @@ namespace Ryujinx.HLE.HOS
                 $"[Nextendo] Ecran-titre : {compresse.Length} o compresses -> {clair.Length} o decompresses");
 
             int tailleAvant = clair.Length;
-            if (!PermuterTextures(clair, LogoNormal, logo, out string pourquoi))
+
+            bool applique = _apportes.TryGetValue(logo, out string ressource)
+                ? InjecterLogo(clair, ressource, out string pourquoi)
+                : PermuterTextures(clair, LogoNormal, logo, out pourquoi);
+
+            if (!applique)
             {
                 Logger.Info?.Print(LogClass.ModLoader,
                     $"[Nextendo] Ecran-titre : {pourquoi} — romfs d'origine conserve");
@@ -224,13 +249,17 @@ namespace Ryujinx.HLE.HOS
             public readonly uint Largeur;
             public readonly uint Hauteur;
 
-            public Texture(int debut, int octets, uint format, uint largeur, uint hauteur)
+            /// <summary>Position du bloc BRTI : c'est la qu'on ecrit le format, a +0x1C.</summary>
+            public readonly int Brti;
+
+            public Texture(int debut, int octets, uint format, uint largeur, uint hauteur, int brti)
             {
                 Debut = debut;
                 Octets = octets;
                 Format = format;
                 Largeur = largeur;
                 Hauteur = hauteur;
+                Brti = brti;
             }
         }
 
@@ -279,6 +308,64 @@ namespace Ryujinx.HLE.HOS
             pourquoi = null;
 
             return true;
+        }
+
+        /// <summary>
+        /// Ecrit un logo que nous apportons dans l'emplacement Logo_00, et bascule le format.
+        /// Refuse des que quelque chose ne correspond pas : c'est le fichier du joueur qu'on
+        /// modifie, et un ecran-titre ne vaut pas qu'on l'abime.
+        /// </summary>
+        private static bool InjecterLogo(byte[] clair, string ressource, out string pourquoi)
+        {
+            byte[] bloc = LireRessource(ressource);
+            if (bloc == null)
+            {
+                pourquoi = $"ressource {ressource} introuvable dans l'emulateur";
+
+                return false;
+            }
+
+            Dictionary<string, Texture> textures = Inventorier(clair);
+            if (!textures.TryGetValue(LogoNormal, out Texture cible))
+            {
+                pourquoi = $"{LogoNormal} introuvable — {textures.Count} texture(s) reperee(s)";
+
+                return false;
+            }
+
+            if (bloc.Length != cible.Octets)
+            {
+                pourquoi = $"le logo apporte fait {bloc.Length} o, l'emplacement en reserve {cible.Octets}";
+
+                return false;
+            }
+
+            Buffer.BlockCopy(bloc, 0, clair, cible.Debut, bloc.Length);
+            BinaryPrimitives.WriteUInt32LittleEndian(clair.AsSpan(cible.Brti + 0x1C, 4), Bc7Srgb);
+
+            Logger.Info?.Print(LogClass.ModLoader,
+                $"[Nextendo] Ecran-titre : logo apporte pose dans {LogoNormal} ({bloc.Length} o, format -> BC7)");
+
+            pourquoi = null;
+
+            return true;
+        }
+
+        private static byte[] LireRessource(string nom)
+        {
+            // Le logo vit dans le code, pas dans une ressource embarquee : voir NextendoLogoLoveFest.
+            byte[] compresse = nom == "lovefest" ? NextendoLogoLoveFest.Zstd() : null;
+            if (compresse == null)
+            {
+                return null;
+            }
+
+            ulong annoncee = ZstdSharp.Decompressor.GetDecompressedSize(compresse);
+            int plafond = annoncee > 0 && annoncee < (ulong)(16 << 20) ? (int)annoncee : 16 << 20;
+
+            using ZstdSharp.Decompressor decompresseur = new();
+
+            return decompresseur.Unwrap(compresse, plafond).ToArray();
         }
 
         private static Dictionary<string, Texture> Inventorier(byte[] donnees)
@@ -344,7 +431,7 @@ namespace Ryujinx.HLE.HOS
                 }
 
                 out_[nom] = new Texture((int)debut, octets,
-                    U32(donnees, (int)(p + 0x1C)), U32(donnees, (int)(p + 0x24)), U32(donnees, (int)(p + 0x28)));
+                    U32(donnees, (int)(p + 0x1C)), U32(donnees, (int)(p + 0x24)), U32(donnees, (int)(p + 0x28)), (int)p);
             }
 
             return out_;

@@ -4,8 +4,10 @@ using Ryujinx.Ava.Systems.AppLibrary;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
@@ -58,6 +60,52 @@ namespace Ryujinx.Ava.Common
         // the next launch whether the server's schedule has changed.
         private static string VersionFilePath => Path.Combine(AppDataManager.BaseDirPath, "nextendo_bcat_version.txt");
 
+        // Les dossiers de premier niveau que la derniere synchronisation a poses. Sans cette
+        // memoire, on ne saurait pas quoi retirer quand le serveur cesse de servir un dossier.
+        private static string DirsFilePath => Path.Combine(AppDataManager.BaseDirPath, "nextendo_bcat_dirs.txt");
+
+        // Les noms de premier niveau contenus dans une archive : « vsdata/VSSetting_0.byaml » rend
+        // « vsdata ». C'est le perimetre exact de ce que cette archive possede.
+        private static HashSet<string> RacinesDe(ZipArchive archive)
+        {
+            HashSet<string> out_ = new(StringComparer.OrdinalIgnoreCase);
+            foreach (ZipArchiveEntry e in archive.Entries)
+            {
+                // Un zip ecrit sous Windows peut separer avec le caractere 92 au lieu de la barre :
+                // on coupe sur les deux.
+                string nom = e.FullName.Split(new[] { '/', (char)92 },
+                    StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+                if (!string.IsNullOrEmpty(nom))
+                {
+                    out_.Add(nom);
+                }
+            }
+
+            return out_;
+        }
+
+        private static HashSet<string> RacinesInstallees()
+        {
+            HashSet<string> out_ = new(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                if (File.Exists(DirsFilePath))
+                {
+                    foreach (string l in File.ReadAllLines(DirsFilePath))
+                    {
+                        string nom = l.Trim();
+                        if (nom.Length > 0)
+                        {
+                            out_.Add(nom);
+                        }
+                    }
+                }
+            }
+            catch { /* liste inconnue : on ne retire rien de plus que ce que l'archive apporte */ }
+
+            return out_;
+        }
+
         /// <summary>
         /// [Nextendo] Force-sync the local BCAT schedule with the server on launch. IsInstalled()
         /// only checks a file EXISTS — it never noticed when the server's schedule changed, so a
@@ -105,25 +153,51 @@ namespace Ryujinx.Ava.Common
                     return false;
                 }
 
-                // Forced refresh: wipe the seed first so files the server dropped (e.g. old stage
-                // assets) don't linger, then extract the current server copy.
-                try
-                {
-                    if (Directory.Exists(SeedRoot))
-                    {
-                        Directory.Delete(SeedRoot, recursive: true);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning?.Print(LogClass.Application, $"[Nextendo] BCAT auto-update: could not clear old seed: {ex.Message}");
-                }
-
+                // ⚠️ ON N'EFFACE QUE CE QUI EST A NOUS.
+                //
+                // Cette place effacait TOUTE la racine du seed, alors qu'elle n'est pas reservee
+                // a Splatoon 2 : Splatoon 3 y depose le paquet de festival, sous eu-default. Un
+                // joueur qui installait le paquet de fete puis lancait Splatoon 2 une seule fois
+                // le perdait sans un message — et sur une installation neuve le fichier
+                // d'empreinte est absent, donc l'effacement etait garanti au premier lancement.
+                //
+                // L'intention d'origine reste : un fichier que le serveur ne sert plus ne doit
+                // pas trainer. On la tient en ne retirant que les dossiers de premier niveau que
+                // cette archive apporte, plus ceux que la synchronisation precedente avait poses
+                // et que le serveur a depuis retires. Tout le reste — les autres jeux — n'est
+                // pas touche.
                 Directory.CreateDirectory(SeedRoot);
+
                 using (MemoryStream ms = new(zip))
                 using (ZipArchive archive = new(ms, ZipArchiveMode.Read))
                 {
+                    HashSet<string> aNous = RacinesDe(archive);
+
+                    foreach (string racine in aNous.Union(RacinesInstallees()))
+                    {
+                        string chemin = Path.Combine(SeedRoot, racine);
+                        try
+                        {
+                            if (Directory.Exists(chemin))
+                            {
+                                Directory.Delete(chemin, recursive: true);
+                            }
+                            else if (File.Exists(chemin))
+                            {
+                                File.Delete(chemin);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Warning?.Print(LogClass.Application,
+                                $"[Nextendo] BCAT auto-update: could not clear {racine}: {ex.Message}");
+                        }
+                    }
+
                     archive.ExtractToDirectory(SeedRoot, overwriteFiles: true);
+
+                    try { File.WriteAllLines(DirsFilePath, aNous.OrderBy(x => x, StringComparer.Ordinal)); }
+                    catch { /* non-fatal : au pire on ne retirera pas un dossier abandonne */ }
                 }
 
                 try { File.WriteAllText(VersionFilePath, serverHash); } catch { /* non-fatal */ }

@@ -221,7 +221,18 @@ namespace Ryujinx.Ava.Systems.Configuration
             System.AudioVolume.Value = 1;
             System.MemoryManagerMode.Value = MemoryManagerMode.HostMappedUnsafe;
             System.DramSize.Value = MemoryConfiguration.MemoryConfiguration4GiB;
-            System.IgnoreMissingServices.Value = false;
+            // [Nextendo] Deux reglages actives d'office, parce que le jeu en ligne les exige et
+            // qu'un joueur n'a aucune raison d'aller les chercher dans les parametres.
+            //
+            // MatchSystemTime : l'horloge de la console suit celle de la machine. Sans elle, elle
+            // derive, et un festival dont les phases changent a des heures precises place le joueur
+            // dans la mauvaise phase — il voit l'annonce quand les autres jouent, ou l'inverse.
+            //
+            // IgnoreMissingServices : quand le jeu reclame un service que l'emulateur n'implemente
+            // pas, il continue au lieu d'abandonner. Laisse a false, il s'arrete sur des services
+            // que l'en-ligne appelle et dont l'absence n'a pourtant aucune consequence.
+            System.MatchSystemTime.Value = true;
+            System.IgnoreMissingServices.Value = true;
             System.IgnoreControllerApplet.Value = false;
             System.SkipUserProfilesManager.Value = false;
             // [Nextendo beta] Hypervisor is macOS-only (Hypervisor.framework). Defaulting it to true

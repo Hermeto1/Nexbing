@@ -86,15 +86,65 @@ namespace Ryujinx.HLE.HOS
         /// </summary>
         public static string Demande { get; set; }
 
+        private static bool _demandeLue;
+
+        /// <summary>
+        /// Demande au serveur quel logo afficher. La verite vit dans la posture de fete de npln-s3,
+        /// relayee par le site : c'est ce qui fait qu'un logo s'eteint tout seul a la fin de la
+        /// fete, au lieu de rester coince sur un evenement termine.
+        ///
+        /// Appel synchrone et bref, fait au chargement du jeu : il faut la reponse AVANT que le
+        /// romfs ne soit monte. Toute panne — reseau coupe, serveur muet, reponse illisible — rend
+        /// une chaine vide, donc « ne touche a rien ».
+        /// </summary>
+        private static string DemanderAuServeur()
+        {
+            try
+            {
+                using System.Net.Http.HttpClient http = new() { Timeout = TimeSpan.FromSeconds(4) };
+
+                string corps = http.GetStringAsync(
+                    $"{Ryujinx.Common.Configuration.NextendoEndpoint.BaseUrl()}/api/fest-logo").Result;
+
+                // Reponse attendue : {"logo":"lovefest"}. On la lit a la main plutot que d'embarquer
+                // un serialiseur pour un seul champ.
+                const string marque = "\"logo\"";
+                int i = corps.IndexOf(marque, StringComparison.Ordinal);
+                if (i < 0)
+                {
+                    return null;
+                }
+
+                int a = corps.IndexOf('"', i + marque.Length + 1);
+                int b = a < 0 ? -1 : corps.IndexOf('"', a + 1);
+
+                return a > 0 && b > a ? corps[(a + 1)..b] : null;
+            }
+            catch (Exception e)
+            {
+                Logger.Info?.Print(LogClass.ModLoader,
+                    $"[Nextendo] Ecran-titre : serveur injoignable ({e.GetType().Name}) — aucun logo");
+
+                return null;
+            }
+        }
+
         private static string LogoDemande()
         {
             string cle = Demande;
 
-            // Interrupteur de developpement, pour pouvoir essayer une variante avant que le serveur
-            // ne la serve. Il ne prend la main que si le serveur n'a rien dit.
+            // Interrupteur de developpement, pour pouvoir essayer une variante sans passer par le
+            // serveur. Il ne prend la main que si rien n'a ete pose par ailleurs.
             if (string.IsNullOrWhiteSpace(cle))
             {
                 cle = Environment.GetEnvironmentVariable("NEXTENDO_LOGO_TITRE");
+            }
+
+            // Sinon, c'est le serveur qui decide. Une seule fois par lancement.
+            if (string.IsNullOrWhiteSpace(cle) && !_demandeLue)
+            {
+                _demandeLue = true;
+                cle = DemanderAuServeur();
             }
 
             if (string.IsNullOrWhiteSpace(cle) || cle.Equals("default", StringComparison.OrdinalIgnoreCase))

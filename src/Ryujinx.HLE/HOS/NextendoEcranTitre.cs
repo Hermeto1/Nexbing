@@ -41,14 +41,26 @@ namespace Ryujinx.HLE.HOS
         private const ulong Splatoon3 = 0x0100C2500FC20000;
         private const string CheminLayout = "/Layout/Plz_Title_00.Nin_NX_NVN.blarc.zs";
 
-        /// <summary>La texture affichee hors evenement : c'est elle qu'on remplace.</summary>
-        private const string LogoNormal = "Logo_01";
+        /// <summary>
+        /// La texture que le jeu affiche reellement. MESURE, pas devinee : la permutation de
+        /// Logo_01 n'a rien change a l'ecran, celle-ci si. Les sept logos forment DEUX familles —
+        /// deux en 918x555 (normal, Splatoween) et cinq en 1530x925 (normal, Frosty, Spring,
+        /// Summer, Grand) — et c'est la petite qui est a l'ecran.
+        /// </summary>
+        private const string LogoNormal = "Logo_00";
 
-        /// <summary>Taille exacte d'un bloc de logo. Toute autre valeur fait renoncer.</summary>
-        private const int OctetsAttendus = 1572864;
+        /// <summary>Garde-fou : au-dela, on ne reconnait plus le fichier et on renonce.</summary>
+        private const int OctetsMaximum = 4 << 20;
 
+        /// <summary>
+        /// Ce qu'on sait echanger AUJOURD'HUI : uniquement dans la famille de Logo_00, seule a
+        /// avoir la meme taille de bloc. Les quatre grands logos d'evenement sont dans l'autre
+        /// famille ; les atteindre demandera d'encoder l'image, pas de permuter des octets, et le
+        /// controle de taille ci-dessous les refusera proprement en attendant.
+        /// </summary>
         private static readonly Dictionary<string, string> _variantes = new(StringComparer.OrdinalIgnoreCase)
         {
+            ["splatoween"] = "Logo_02",
             ["frosty"] = "Logo_03",
             ["spring"] = "Logo_04",
             ["summer"] = "Logo_05",
@@ -82,6 +94,9 @@ namespace Ryujinx.HLE.HOS
 
         public static IStorage Appliquer(ulong applicationId, IStorage baseStorage)
         {
+            Logger.Info?.Print(LogClass.ModLoader,
+                $"[Nextendo] Ecran-titre : appel pour {applicationId:X16} (romfs {(baseStorage == null ? "absent" : "present")})");
+
             if (applicationId != Splatoon3 || baseStorage == null)
             {
                 return baseStorage;
@@ -126,11 +141,21 @@ namespace Ryujinx.HLE.HOS
                 return baseStorage;
             }
 
+            // ⚠️ Unwrap plafonne la sortie par defaut. Le blarc de l'ecran-titre fait dix megaoctets
+            // une fois decompresse ; sans plafond explicite, on recupere un tampon TRONQUE, et les
+            // textures situees au-dela passent pour absentes. Mesure : 11 textures sur 17 reperees,
+            // les six dernieres perdues.
+            ulong annoncee = ZstdSharp.Decompressor.GetDecompressedSize(compresse);
+            int plafond = annoncee > 0 && annoncee < (ulong)(64 << 20) ? (int)annoncee : 64 << 20;
+
             byte[] clair;
             using (ZstdSharp.Decompressor decompresseur = new())
             {
-                clair = decompresseur.Unwrap(compresse).ToArray();
+                clair = decompresseur.Unwrap(compresse, plafond).ToArray();
             }
+
+            Logger.Info?.Print(LogClass.ModLoader,
+                $"[Nextendo] Ecran-titre : {compresse.Length} o compresses -> {clair.Length} o decompresses");
 
             int tailleAvant = clair.Length;
             if (!PermuterTextures(clair, LogoNormal, logo, out string pourquoi))
@@ -215,14 +240,25 @@ namespace Ryujinx.HLE.HOS
 
             if (!textures.TryGetValue(nomA, out Texture a) || !textures.TryGetValue(nomB, out Texture b))
             {
-                pourquoi = $"{nomA} ou {nomB} introuvable dans le fichier du joueur";
+                pourquoi = $"{nomA} ou {nomB} introuvable — {textures.Count} texture(s) reperee(s) : "
+                    + string.Join(", ", textures.Keys.Take(20));
 
                 return false;
             }
 
-            if (a.Octets != OctetsAttendus || b.Octets != OctetsAttendus)
+            // L'invariant qui rend l'echange sur : MEME taille de bloc. C'est lui qui garantit que
+            // le fichier decompresse ne bouge pas d'un octet, donc que la table des tailles du jeu
+            // reste valide. Un dump inattendu, ou une paire mal choisie, s'arrete ici.
+            if (a.Octets != b.Octets)
             {
-                pourquoi = $"tailles inattendues ({a.Octets} et {b.Octets}, attendu {OctetsAttendus})";
+                pourquoi = $"tailles differentes ({a.Octets} et {b.Octets}) — echange refuse";
+
+                return false;
+            }
+
+            if (a.Octets <= 0 || a.Octets > OctetsMaximum)
+            {
+                pourquoi = $"taille de bloc invraisemblable ({a.Octets} o)";
 
                 return false;
             }
@@ -234,10 +270,11 @@ namespace Ryujinx.HLE.HOS
                 return false;
             }
 
-            byte[] tampon = new byte[OctetsAttendus];
-            Buffer.BlockCopy(clair, a.Debut, tampon, 0, OctetsAttendus);
-            Buffer.BlockCopy(clair, b.Debut, clair, a.Debut, OctetsAttendus);
-            Buffer.BlockCopy(tampon, 0, clair, b.Debut, OctetsAttendus);
+            int n = a.Octets;
+            byte[] tampon = new byte[n];
+            Buffer.BlockCopy(clair, a.Debut, tampon, 0, n);
+            Buffer.BlockCopy(clair, b.Debut, clair, a.Debut, n);
+            Buffer.BlockCopy(tampon, 0, clair, b.Debut, n);
 
             pourquoi = null;
 

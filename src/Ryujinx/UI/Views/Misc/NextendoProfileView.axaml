@@ -1,0 +1,237 @@
+<!-- [Nextendo] App-style profile panel shown from the Switch launcher's circular profile
+     button. Combines identity (avatar / name / friend code / presence), session controls
+     (connect / copy friend code / sign out) and the social tabs the companion app offers:
+     Friends, Activity (who is playing now + recent encounters) and Play history. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:helpers="using:Ryujinx.Ava.UI.Helpers"
+             xmlns:models="using:Ryujinx.Ava.UI.Models"
+             mc:Ignorable="d"
+             Width="520"
+             x:Class="Ryujinx.Ava.UI.Views.Misc.NextendoProfileView">
+    <Grid RowDefinitions="Auto,Auto,Auto,*" MinHeight="420">
+
+        <!-- Identity header: the same avatar / name / code the website and friends see. -->
+        <Border Grid.Row="0" Background="#1A808080" CornerRadius="8" Padding="12">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <Border Grid.Column="0" Width="64" Height="64" CornerRadius="8" ClipToBounds="True" Background="#33000000">
+                    <Image Name="AvatarImage" Stretch="UniformToFill" />
+                </Border>
+                <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Spacing="2">
+                    <TextBlock Name="ProfileName" FontSize="18" FontWeight="Bold" Text="Perfil" />
+                    <TextBlock Name="ProfileFriendCode" Opacity="0.85" FontSize="12" Text="SW-…" />
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <Ellipse Name="ProfileStatusDot" Width="8" Height="8" VerticalAlignment="Center" />
+                        <TextBlock Name="ProfileStatusText" FontSize="11" Opacity="0.8" />
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="6">
+                    <Button Name="ConnectButton" Content="Conectar cuenta" IsVisible="False" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Button Name="CopyCodeButton" Content="Copiar código" />
+                        <Button Name="SignOutButton" Content="Cerrar sesión" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Tab bar: the three sections, styled as Switch-ish pills. -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,8" Spacing="8">
+            <Button Name="FriendsTabButton" Click="SelectFriendsTab" Content="Amigos" />
+            <Button Name="ActivityTabButton" Click="SelectActivityTab" Content="Actividad" />
+            <Button Name="HistoryTabButton" Click="SelectHistoryTab" Content="Historial" />
+        </StackPanel>
+
+        <Border Grid.Row="2" Height="1" HorizontalAlignment="Stretch" Background="#33808080" Margin="0,0,0,8" />
+
+        <Grid Grid.Row="3" Name="ContentHost">
+            <!-- Tab #1: Friends -->
+            <Grid Name="FriendsTab" IsVisible="True">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Name="RequestsPanel" Spacing="6" Margin="0,0,0,8" IsVisible="False">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Classes="h1" VerticalAlignment="Center" Text="Solicitudes de amistad" />
+                        <Button Grid.Column="1" Name="AcceptAllButton" Content="Aceptar todas" />
+                    </Grid>
+                    <ItemsControl Name="RequestsList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="models:NextendoFriendModel">
+                                <Border Background="#14808080" CornerRadius="6" Padding="8" Margin="0,0,0,4">
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                                        <Border Grid.Column="0" Width="34" Height="34" CornerRadius="4"
+                                                ClipToBounds="True" Background="#33000000">
+                                            <Image Source="{Binding Image, Converter={x:Static helpers:BitmapArrayValueConverter.Instance}}"
+                                                   Stretch="UniformToFill" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding FriendCode}" FontSize="11" Opacity="0.6" />
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Click="AcceptRequest_Click" Tag="{Binding Pid}" Content="Aceptar" />
+                                        <Button Grid.Column="3" Margin="6,0,0,0" Click="DeclineRequest_Click" Tag="{Binding Pid}" Content="Rechazar" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="1">
+                    <StackPanel Spacing="4">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Classes="h1" VerticalAlignment="Center" Text="Mis amigos" />
+                            <TextBlock Grid.Column="1" Name="OnlineCountText" VerticalAlignment="Center"
+                                       FontSize="11" Foreground="#33E86B" />
+                        </Grid>
+                        <TextBlock Name="NoFriendsText" TextWrapping="Wrap" Opacity="0.7" IsVisible="False"
+                                   Text="Aún no tienes amigos. Comparte tu código de amigo para que te añadan." />
+                        <ItemsControl Name="FriendsList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="models:NextendoFriendModel">
+                                    <Border Background="#14808080" CornerRadius="6" Padding="8" Margin="0,0,0,4">
+                                        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                                            <Panel Grid.Column="0">
+                                                <Border Width="40" Height="40" CornerRadius="4" ClipToBounds="True" Background="#33000000">
+                                                    <Image Source="{Binding Image, Converter={x:Static helpers:BitmapArrayValueConverter.Instance}}"
+                                                           Stretch="UniformToFill" />
+                                                </Border>
+                                                <Ellipse Width="11" Height="11" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                         Margin="0,0,-2,-2" Stroke="#1E1E1E" StrokeThickness="2"
+                                                         Fill="{Binding StatusColor}" />
+                                            </Panel>
+                                            <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Spacing="1">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding StatusText}" FontSize="11" Opacity="0.7" />
+                                                <TextBlock Text="{Binding FriendCode}" FontSize="10" Opacity="0.45" />
+                                            </StackPanel>
+                                            <Button Grid.Column="2" VerticalAlignment="Center" Click="Favorite_Click" Tag="{Binding Pid}"
+                                                    Background="Transparent" BorderThickness="0" Padding="6,2" FontSize="18"
+                                                    Foreground="{Binding FavoriteColor}" Content="★" />
+                                            <Button Grid.Column="3" VerticalAlignment="Center" Click="RemoveFriend_Click"
+                                                    Tag="{Binding Pid}" Content="Eliminar" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <StackPanel Grid.Row="2" Margin="0,10,0,0" Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Grid.Column="0" Name="AddFriendBox" Watermark="Código de amigo (SW-…)" />
+                        <Button Grid.Column="1" Name="AddFriendButton" Margin="8,0,0,0" Content="Añadir" />
+                    </Grid>
+                    <TextBlock Name="FriendsStatusText" TextWrapping="Wrap" FontSize="11" IsVisible="False" />
+                </StackPanel>
+            </Grid>
+
+            <!-- Tab #2: Activity -->
+            <Grid Name="ActivityTab" IsVisible="False">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Classes="h1" Text="Jugando ahora" />
+                <ScrollViewer Grid.Row="1">
+                    <StackPanel Spacing="8">
+                        <TextBlock Name="PlayingNowText" TextWrapping="Wrap" Opacity="0.7"
+                                   Text="Cargando actividad…" />
+                        <ItemsControl Name="PlayingNowList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="models:NextendoFriendModel">
+                                    <Border Background="#14808080" CornerRadius="6" Padding="8" Margin="0,0,0,4">
+                                        <Grid ColumnDefinitions="Auto,*">
+                                            <Panel Grid.Column="0">
+                                                <Border Width="36" Height="36" CornerRadius="4" ClipToBounds="True" Background="#33000000">
+                                                    <Image Source="{Binding Image, Converter={x:Static helpers:BitmapArrayValueConverter.Instance}}"
+                                                           Stretch="UniformToFill" />
+                                                </Border>
+                                                <Ellipse Width="10" Height="10" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                         Margin="0,0,-2,-2" Stroke="#1E1E1E" StrokeThickness="2" Fill="#33E86B" />
+                                            </Panel>
+                                            <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Spacing="1">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding StatusText}" FontSize="11" Opacity="0.7" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Classes="h1" Text="Encontrados recientemente" Margin="0,8,0,0" />
+                        <TextBlock Name="RecentText" TextWrapping="Wrap" Opacity="0.7" IsVisible="False"
+                                   Text="Aún no te has encontrado con nadie jugando en línea." />
+                        <ItemsControl Name="RecentList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="models:NextendoLobbyPlayerModel">
+                                    <Border Background="#14808080" CornerRadius="6" Padding="8" Margin="0,0,0,4">
+                                        <Grid ColumnDefinitions="Auto,*">
+                                            <Border Grid.Column="0" Width="36" Height="36" CornerRadius="4"
+                                                    ClipToBounds="True" Background="#33000000">
+                                                <Panel>
+                                                    <Image IsVisible="{Binding HasImage}" Source="{Binding Image, Converter={x:Static helpers:BitmapArrayValueConverter.Instance}}"
+                                                           Stretch="UniformToFill" />
+                                                    <TextBlock IsVisible="{Binding ShowInitial}" Text="{Binding Initial}"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                               FontSize="16" FontWeight="Bold" />
+                                                </Panel>
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Spacing="1">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding SeenLine}" FontSize="11" Opacity="0.7" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- Tab #3: History -->
+            <Grid Name="HistoryTab" IsVisible="False">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Classes="h1" Text="Historial de juego" />
+                <ScrollViewer Grid.Row="1">
+                    <StackPanel Spacing="4">
+                        <TextBlock Name="NoHistoryText" TextWrapping="Wrap" Opacity="0.7" IsVisible="False"
+                                   Text="Aún no hay historial de juego registrado." />
+                        <ItemsControl Name="HistoryList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="models:NextendoHistoryModel">
+                                    <Border Background="#14808080" CornerRadius="6" Padding="8" Margin="0,0,0,4">
+                                        <Grid ColumnDefinitions="Auto,*,Auto">
+                                            <Border Grid.Column="0" Width="36" Height="36" CornerRadius="4"
+                                                    ClipToBounds="True" Background="#33000000">
+                                                <Image Source="{Binding Icon, Converter={x:Static helpers:BitmapArrayValueConverter.Instance}}"
+                                                       Stretch="UniformToFill" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Spacing="1">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding LastText}" FontSize="11" Opacity="0.6" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="2" Text="{Binding PlayedText}" VerticalAlignment="Center"
+                                                       FontSize="12" Foreground="#33E86B" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+    </Grid>
+</UserControl>

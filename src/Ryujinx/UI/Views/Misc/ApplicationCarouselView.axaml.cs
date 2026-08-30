@@ -4,18 +4,29 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Svg.Skia;
 using Avalonia.Threading;
 using FluentAvalonia.UI.Controls;
+using Ryujinx.Ava.Common.Locale;
 using Ryujinx.Ava.Systems.AppLibrary;
+using Ryujinx.Ava.Systems.Configuration;
 using Ryujinx.Ava.UI.Controls;
+using Avalonia.Layout;
 using Ryujinx.Ava.UI.Helpers;
 using Ryujinx.Ava.UI.ViewModels;
+using Ryujinx.Ava.UI.Windows;
+using Ryujinx.Ava.Utilities;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Utilities;
 using Ryujinx.Input;
+using LibHac.Common;
+using LibHac.Ns;
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace Ryujinx.Ava.UI.Views.Misc
@@ -31,11 +42,6 @@ namespace Ryujinx.Ava.UI.Views.Misc
             remove => RemoveHandler(ApplicationOpenedEvent, value);
         }
 
-        private const double SelectedScale = 1.07;
-        private const double UnselectedScale = 0.97;
-        private const double SelectedLift = -26;
-        private const double UnselectedSink = 6;
-
         private readonly DispatcherTimer _clockTimer;
         private readonly DispatcherTimer _connectionTimer;
         private readonly DispatcherTimer _gamepadTimer;
@@ -45,6 +51,21 @@ namespace Ryujinx.Ava.UI.Views.Misc
         private bool _gamepadUpPressed;
         private bool _gamepadDownPressed;
         private bool _gamepadConfirmDown;
+        private bool _gamepadMenuDown;
+        private bool _gamepadBackDown;
+
+        // [Nextendo] Joystick-driven context menu: the selected option index plus the UI
+        // elements it moves across. The Y/X buttons open it and the joystick / A / B drive it.
+        private int _contextMenuIndex;
+        private readonly List<Border> _contextMenuItemBorders = [];
+        private readonly List<Action> _contextMenuActions = [];
+
+        // The profile dialog (left, circular button) so B can close it from the gamepad.
+        private ContentDialog _profileDialog;
+
+        // [Nextendo] Home+Plus combo: edge-tracked Plus press while Home is held (see
+        // PollProfileShortcut). Runs unpolled by the game gate so it works with a game open.
+        private bool _profileComboPlusPressed;
 
         private const int NavProfile = -1;
         private const int NavCarousel = 0;
@@ -52,6 +73,10 @@ namespace Ryujinx.Ava.UI.Views.Misc
 
         private int _navLevel;
         private int _bottomIndex;
+
+        private MainWindow _window;
+
+        private const int BottomButtonCount = 6;
 
         public ApplicationCarouselView()
         {
@@ -66,13 +91,49 @@ namespace Ryujinx.Ava.UI.Views.Misc
             _connectionTimer.Start();
 
             _gamepadTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
-            _gamepadTimer.Tick += (_, _) => PollGamepad();
+            // [Nextendo] The Home+Plus shortcut must keep working while a game/applet runs, so it
+            // is polled before the gated PollGamepad: for the launcher a running game briefly
+            // owns the controller for the menu ring, but the physical combo stays a dashboard one.
+            _gamepadTimer.Tick += (_, _) =>
+            {
+                PollProfileShortcut();
+                PollGamepad();
+            };
             _gamepadTimer.Start();
 
             CarouselList.SelectionChanged += CarouselList_SelectionChanged;
             Loaded += (_, _) => { _ = LoadAvatarAsync(); LoadDiscordSvg(); };
             Loaded += (_, _) => LoadWallpaper();
             ConfigurationState.Instance.UI.WallpaperPath.Event += (_, _) => LoadWallpaper();
+        }
+
+        protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+        {
+            base.OnAttachedToVisualTree(e);
+            _window = VisualRoot as MainWindow;
+        }
+
+        // [Nextendo] Loads the Discord logo (PNG) into the round Discord button.
+        private void LoadDiscordSvg()
+        {
+            if (DiscordButton == null)
+                return;
+
+            try
+            {
+                using var stream = AssetLoader.Open(new Uri("resm:Ryujinx.Assets.UIImages.Logo_Discord_Nextendo.png?assembly=Ryujinx"));
+                DiscordButton.Content = new Image
+                {
+                    Source = new Bitmap(stream),
+                    Width = 40,
+                    Height = 40,
+                    Stretch = Stretch.Uniform,
+                };
+            }
+            catch
+            {
+                // The button simply keeps its default empty look if the asset is missing.
+            }
         }
 
         // [Nextendo] Applies the user's chosen wallpaper image as the launcher background.
@@ -84,9 +145,21 @@ namespace Ryujinx.Ava.UI.Views.Misc
                 if (WallpaperBackground != null)
                 {
                     if (!string.IsNullOrEmpty(path) && File.Exists(path))
-                        WallpaperBackground.Source = new Bitmap(path);
+                    {
+                        if (Path.GetExtension(path).Equals(".svg", StringComparison.OrdinalIgnoreCase))
+                        {
+                            using var stream = File.OpenRead(path);
+                            WallpaperBackground.Source = new SvgImage { Source = SvgSource.LoadFromStream(stream) };
+                        }
+                        else
+                        {
+                            WallpaperBackground.Source = new Bitmap(path);
+                        }
+                    }
                     else
+                    {
                         WallpaperBackground.Source = null;
+                    }
                 }
             }
             catch
@@ -103,8 +176,22 @@ namespace Ryujinx.Ava.UI.Views.Misc
                 RaiseEvent(new ApplicationOpenedEventArgs(selected, ApplicationOpenedEvent));
         }
 
-        private async void ProfileButton_OnClick(object? sender, RoutedEventArgs e)
+        private void ProfileButton_OnClick(object? sender, RoutedEventArgs e) => OpenNextendoProfile();
+
+        /// <summary>
+        /// [Nextendo] Opens the launcher profile dialog. Public so it can be called from the
+        /// top-level window (Ctrl+F) and from the gamepad Home+Plus shortcut, both of which
+        /// must keep working while a game is running. The dialog is tracked so the gamepad's
+        /// B button can close it (see PollGamepad).
+        /// </summary>
+        public async void OpenNextendoProfile()
         {
+            // Already open (e.g. fast double Ctrl+F, held combo): don't stack dialogs.
+            if (_profileDialog != null)
+            {
+                return;
+            }
+
             try
             {
                 ClearBottomFocus();
@@ -117,10 +204,21 @@ namespace Ryujinx.Ava.UI.Views.Misc
                     Content = profile,
                     CloseButtonText = "Cerrar",
                 };
-                await ContentDialogHelper.ShowAsync(dialog);
+
+                // Tracked so the gamepad's B button can close it (see PollGamepad).
+                _profileDialog = dialog;
+                try
+                {
+                    await ContentDialogHelper.ShowAsync(dialog);
+                }
+                finally
+                {
+                    _profileDialog = null;
+                }
             }
             catch (Exception)
             {
+                _profileDialog = null;
                 // Never let a UI issue in the profile block the launcher.
             }
         }
@@ -158,6 +256,93 @@ namespace Ryujinx.Ava.UI.Views.Misc
             ClearBottomFocus();
             try { await Ryujinx.Ava.Common.NextendoPatchNotes.ShowAsync(); }
             catch (Exception) { /* ignore */ }
+        }
+
+        // [Nextendo] Fast-open the Mii editor applet: the same action as Actions > Tools > Mii editor.
+        private async void MiiEditorButton_OnClick(object? sender, RoutedEventArgs e)
+        {
+            ClearBottomFocus();
+            try
+            {
+                var mii = new AppletMetadata(
+                    ViewModel.ContentManager,
+                    LocaleManager.Instance[LocaleKeys.MenuBar_Actions_MiiEditorButton],
+                    0x0100000000001009);
+
+                if (!mii.CanStart(out ApplicationData appData, out BlitStruct<ApplicationControlProperty> nacpData))
+                    return;
+
+                await ViewModel.LoadApplication(appData, ViewModel.IsFullScreen || ViewModel.StartGamesInFullscreen, nacpData);
+            }
+            catch (Exception)
+            {
+                // Never let a launcher shortcut crash the UI.
+            }
+        }
+
+        // [Nextendo] Fast-open the controller configuration (Settings > the Input page).
+        private async void ControlsButton_OnClick(object? sender, RoutedEventArgs e)
+        {
+            ClearBottomFocus();
+            MainWindow window = _window;
+            if (window == null || window.SettingsWindow != null)
+                return;
+
+            try
+            {
+                window.SettingsWindow = new SettingsWindow(window.VirtualFileSystem, window.ContentManager);
+                window.SettingsWindow.NavPanel.Content = window.SettingsWindow.InputPage;
+                window.SettingsWindow.NavPanel.SelectedItem = window.SettingsWindow.NavPanel.MenuItems.ElementAt(1);
+
+                await ContentDialogHelper.ShowWindowAsync(window.SettingsWindow, window);
+            }
+            catch (Exception)
+            {
+                // Ignore: opening controls must never take the launcher down.
+            }
+            finally
+            {
+                window.SettingsWindow = null;
+            }
+        }
+
+        // [Nextendo] Fast-open the emulator settings; same behaviour as Options > Settings (it
+        // respects a running game's own configuration).
+        private async void SettingsButton_OnClick(object? sender, RoutedEventArgs e)
+        {
+            ClearBottomFocus();
+            MainWindow window = _window;
+            if (window == null)
+                return;
+
+            window.SettingsWindow = new(window.VirtualFileSystem, window.ContentManager);
+
+            Rainbow.Enable();
+
+            if (ViewModel.SelectedApplication is null)
+            {
+                await StyleableAppWindow.ShowAsync(window.SettingsWindow);
+            }
+            else
+            {
+                bool customConfigExists = File.Exists(Program.GetDirGameUserConfig(ViewModel.SelectedApplication.IdString));
+
+                if (!ViewModel.IsGameRunning || !customConfigExists)
+                {
+                    await window.SettingsWindow.ShowDialog(window);
+                }
+                else
+                {
+                    await StyleableAppWindow.ShowAsync(new GameSpecificSettingsWindow(ViewModel, customConfigExists));
+                }
+            }
+
+            Rainbow.Disable();
+            Rainbow.Reset();
+
+            window.SettingsWindow = null;
+
+            ViewModel.LoadConfigurableHotKeys();
         }
 
         private void CarouselList_KeyDown(object? sender, KeyEventArgs e)
@@ -217,7 +402,10 @@ namespace Ryujinx.Ava.UI.Views.Misc
         {
             0 => WebsiteButton,
             1 => DiscordButton,
-            _ => NewsButton,
+            2 => NewsButton,
+            3 => MiiEditorButton,
+            4 => ControlsButton,
+            _ => SettingsButton,
         };
 
         private void EnterBottom()
@@ -247,14 +435,14 @@ namespace Ryujinx.Ava.UI.Views.Misc
 
         private void MoveBottom(int delta)
         {
-            _bottomIndex = Math.Clamp(_bottomIndex + delta, 0, 2);
+            _bottomIndex = Math.Clamp(_bottomIndex + delta, 0, BottomButtonCount - 1);
             UpdateSectionHighlights();
         }
 
         private void UpdateSectionHighlights()
         {
             bool bottomFocused = _navLevel == NavBottom;
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < BottomButtonCount; i++)
                 GetBottomButton(i).Classes.Set("carouselBottomSelected", bottomFocused && i == _bottomIndex);
 
             if (ProfileSelectionRing != null)
@@ -267,111 +455,250 @@ namespace Ryujinx.Ava.UI.Views.Misc
             {
                 case 0: WebsiteButton_OnClick(this, null); break;
                 case 1: DiscordButton_OnClick(this, null); break;
-                default: NewsButton_OnClick(this, null); break;
+                case 2: NewsButton_OnClick(this, null); break;
+                case 3: MiiEditorButton_OnClick(this, null); break;
+                case 4: ControlsButton_OnClick(this, null); break;
+                default: SettingsButton_OnClick(this, null); break;
             }
         }
 
-private void CarouselList_RightTapped(object? sender, RoutedEventArgs e)
+        private void CarouselList_ContextRequested(object? sender, ContextRequestedEventArgs e)
         {
-            if (CarouselList.SelectedItem is ApplicationData selected)
+            OpenContextMenu();
+        }
+
+        // [Nextendo] Opens the per-game options flyout for the currently selected tile. Shared
+        // between the mouse right-click (ContextRequested) and the Y/X buttons on the gamepad,
+        // and fully navigable with the joystick/d-pad: A accepts the highlighted option, B closes.
+        private void OpenContextMenu()
+        {
+            if (CarouselList.SelectedItem is not ApplicationData selected)
             {
-                var flyout = new Flyout
+                return;
+            }
+
+            // The menu commands act on MainWindowViewModel.SelectedApplication, which in
+            // carousel mode resolves to CarouselSelectedApplication.
+            ViewModel.CarouselSelectedApplication = selected;
+
+            _contextMenuActions.Clear();
+            _contextMenuItemBorders.Clear();
+
+            _contextMenuActions.Add(() => MainWindowViewModel.RunApplication.Execute(ViewModel));
+            _contextMenuActions.Add(() => MainWindowViewModel.ToggleFavorite.Execute(ViewModel));
+            _contextMenuActions.Add(() => MainWindowViewModel.OpenTitleUpdateManager.Execute(ViewModel));
+            _contextMenuActions.Add(() => MainWindowViewModel.OpenDownloadableContentManager.Execute(ViewModel));
+            _contextMenuActions.Add(() => MainWindowViewModel.OpenModManager.Execute(ViewModel));
+
+            string[] labels =
+            {
+                LocaleManager.Instance[LocaleKeys.GameListContextMenuRunApplication],
+                LocaleManager.Instance[LocaleKeys.GameListContextMenuToggleFavorite],
+                LocaleManager.Instance[LocaleKeys.GameListContextMenuManageTitleUpdates],
+                LocaleManager.Instance[LocaleKeys.GameListContextMenuManageDlc],
+                LocaleManager.Instance[LocaleKeys.GameListContextMenuManageMod],
+            };
+
+            var panel = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                Spacing = 6,
+            };
+
+            for (int i = 0; i < labels.Length; i++)
+            {
+                int index = i;
+                var border = new Border
                 {
-                    Placement = FlyoutPlacementMode.Bottom,
-                    Content = new StackPanel
+                    MinWidth = 230,
+                    Padding = new Thickness(14, 7),
+                    CornerRadius = new CornerRadius(5),
+                    Child = new TextBlock
                     {
-                        Orientation = Orientation.Vertical,
-                        Spacing = 8,
-                        Children = new UIElement[]
-                        {
-                            new TextBlock { Text = "Start", FontWeight = FontWeight.SemiBold, PointerPressed = OnMenuItemClick },
-                            new TextBlock { Text = "Favorite", FontWeight = FontWeight.SemiBold, PointerPressed = OnMenuItemClick },
-                            new TextBlock { Text = "Manage Updates", FontWeight = FontWeight.SemiBold, PointerPressed = OnMenuItemClick },
-                            new TextBlock { Text = "Manage Dlc", FontWeight = FontWeight.SemiBold, PointerPressed = OnMenuItemClick },
-                            new TextBlock { Text = "Manage Mods", FontWeight = FontWeight.SemiBold, PointerPressed = OnMenuItemClick },
-                        }
-                    }
+                        Text = labels[i],
+                        FontWeight = FontWeight.SemiBold,
+                    },
                 };
-                flyout.ShowAt(CarouselList, e.GetPosition(CarouselList));
+                border.Tapped += (_, _) => ExecuteContextMenuItem(index);
+                panel.Children.Add(border);
+                _contextMenuItemBorders.Add(border);
+            }
+
+            _contextMenuIndex = 0;
+            UpdateContextMenuHighlight();
+
+            _contextMenuFlyout = new Flyout
+            {
+                Placement = PlacementMode.Bottom,
+                Content = panel,
+            };
+
+            _contextMenuFlyout.ShowAt(CarouselList, true);
+        }
+
+        private void MoveContextMenuSelection(int delta)
+        {
+            if (_contextMenuItemBorders.Count == 0)
+            {
+                return;
+            }
+
+            _contextMenuIndex = Math.Clamp(_contextMenuIndex + delta, 0, _contextMenuItemBorders.Count - 1);
+            UpdateContextMenuHighlight();
+        }
+
+        private void UpdateContextMenuHighlight()
+        {
+            for (int i = 0; i < _contextMenuItemBorders.Count; i++)
+            {
+                _contextMenuItemBorders[i].Background = new SolidColorBrush(Color.FromArgb(
+                    (byte)(i == _contextMenuIndex ? 255 : 0), 62, 232, 200));
             }
         }
 
-        private void OnMenuItemClick(object? sender, PointerPressedEventArgs e)
+        private void ExecuteContextMenuItem(int index)
         {
-            // Placeholder: aquí se implementaría la lógica para cada opción
-            // Start, Favorite, Manage Updates, Manage Dlc, Manage Mods
-            // Para Mario Kart 8 Deluxe: mostrar menú de banderas de país
-            Flyout flyout = sender as Flyout;
-            if (flyout != null)
-                flyout.Hide();
+            CloseContextMenu();
+
+            if (index < 0 || index >= _contextMenuActions.Count)
+            {
+                return;
+            }
+
+            try
+            {
+                _contextMenuActions[index]();
+            }
+            catch (Exception)
+            {
+                // Never let a menu action crash the launcher.
+            }
         }
+
+        private void CloseContextMenu()
+        {
+            _contextMenuFlyout?.Hide();
+            _contextMenuFlyout = null;
+            _contextMenuIndex = 0;
+        }
+
+        private Flyout _contextMenuFlyout;
 
         private void MoveBy(int delta)
         {
-            if (ViewModel.AppsObservableList == null || ViewModel.AppsObservableList.Count == 0)
+            ReadOnlyObservableCollection<ApplicationData> list = ViewModel.CarouselAppsObservableList;
+            if (list == null || list.Count == 0)
+            {
                 return;
+            }
 
             ApplicationData current = CarouselList.SelectedItem as ApplicationData;
-            int index = current != null ? ViewModel.AppsObservableList.IndexOf(current) : -1;
+            int index = current != null ? list.IndexOf(current) : -1;
             if (index < 0)
+            {
                 index = 0;
+            }
 
-            int target = Math.Clamp(index + delta, 0, ViewModel.AppsObservableList.Count - 1);
+            int target = Math.Clamp(index + delta, 0, list.Count - 1);
             CarouselList.SelectedIndex = target;
-            CarouselList.ScrollIntoView(ViewModel.AppsObservableList[target]);
+            CarouselList.ScrollIntoView(list[target]);
         }
 
         private void CarouselList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
         {
-            ApplySelectionScale();
+            // [Nextendo] Feed the library commands (Run, Favorite, managers...) which read
+            // MainWindowViewModel.SelectedApplication.
+            ViewModel.CarouselSelectedApplication = CarouselList.SelectedItem as ApplicationData;
         }
 
-        private void ApplySelectionScale()
+        // [Nextendo] Mouse wheel selects games like the stick does: wheel up = previous tile,
+        // wheel down = next tile. Works in the carousel nav level only.
+        private void CarouselList_PointerWheelChanged(object? sender, PointerWheelEventArgs e)
         {
-            var panel = CarouselList.ItemsPanelRoot as Panel;
-            if (panel == null)
-                return;
-
-            var selectedContainer = CarouselList.SelectedItem != null
-                ? CarouselList.ContainerFromItem(CarouselList.SelectedItem)
-                : null;
-
-            foreach (var child in panel.Children)
+            if (_navLevel != NavCarousel)
             {
-                if (child is ListBoxItem item)
-                {
-                    bool isSelected = ReferenceEquals(item, selectedContainer);
+                return;
+            }
 
-                    // The selected tile is enlarged and lifted upward while the neighbours sink
-                    // and shrink, so it separates from the row instead of overlapping them
-                    // (Switch home-menu style). ZIndex keeps the selected tile on top.
-                    double scale = isSelected ? SelectedScale : UnselectedScale;
-                    double dy = isSelected ? SelectedLift : UnselectedSink;
+            e.Handled = true;
 
-                    var transform = new TransformGroup();
-                    transform.Children.Add(new ScaleTransform(scale, scale));
-                    transform.Children.Add(new TranslateTransform(0, dy));
-
-                    item.RenderTransform = transform;
-                    item.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
-                    item.ZIndex = isSelected ? 10 : 0;
-                }
+            double delta = e.Delta.Y != 0 ? e.Delta.Y : e.Delta.X;
+            if (delta > 0)
+            {
+                MoveBy(-1);
+            }
+            else if (delta < 0)
+            {
+                MoveBy(1);
             }
         }
 
         private IGamepad _menuGamepad;
         private string _menuGamepadId;
 
-        private void PollGamepad()
+        private void ResetGamepadInputFlags()
+        {
+            _gamepadLeftPressed = false;
+            _gamepadRightPressed = false;
+            _gamepadUpPressed = false;
+            _gamepadDownPressed = false;
+            _gamepadConfirmDown = false;
+            _gamepadMenuDown = false;
+            _gamepadBackDown = false;
+        }
+
+        /// <summary>
+        /// [Nextendo] Launcher shortcut: hold Home and press + once → open the profile dialog.
+        /// The raw (unmapped) snapshot is used on purpose, because Home and + are physical buttons
+        /// that players reach for as a "dashboard" gesture regardless of the in-game remapping —
+        /// the mapped snapshot only exposes logical Switch buttons. It is polled outside the
+        /// PollGamepad gate so the same combo works while a game/applet runs.
+        /// </summary>
+        private void PollProfileShortcut()
         {
             IGamepad gamepad = GetConfiguredGamepad();
             if (gamepad == null)
             {
-                _gamepadLeftPressed = false;
-                _gamepadRightPressed = false;
-                _gamepadUpPressed = false;
-                _gamepadDownPressed = false;
-                _gamepadConfirmDown = false;
+                _profileComboPlusPressed = false;
+                return;
+            }
+
+            GamepadStateSnapshot snapshot = gamepad.GetStateSnapshot();
+
+            bool home = snapshot.IsPressed(GamepadButtonInputId.Guide);
+            bool plus = snapshot.IsPressed(GamepadButtonInputId.Plus);
+
+            if (home && plus && !_profileComboPlusPressed)
+            {
+                _profileComboPlusPressed = true;
+                OpenNextendoProfile();
+            }
+            else if (!plus)
+            {
+                _profileComboPlusPressed = false;
+            }
+        }
+
+        private void PollGamepad()
+        {
+            // [Nextendo] While a game/applet (Mii editor, controller applet, ...) runs in the
+            // embedded renderer, or a modal window (settings, profile, ...) is open on top, the
+            // controller belongs to that thing — the launcher must not keep consuming it (it
+            // would move the menu, open panels, or even launch titles behind the Mii editor).
+            // Also skip when the carousel is not on screen (another library view, or the renderer
+            // replaced it). Edge flags are cleared so resumed input never triggers a phantom press.
+            if (ViewModel.IsGameRunning ||
+                !IsEffectivelyVisible ||
+                (_window != null && _window.SettingsWindow != null))
+            {
+                ResetGamepadInputFlags();
+                return;
+            }
+
+            IGamepad gamepad = GetConfiguredGamepad();
+            if (gamepad == null)
+            {
+                ResetGamepadInputFlags();
                 return;
             }
 
@@ -385,45 +712,86 @@ private void CarouselList_RightTapped(object? sender, RoutedEventArgs e)
             bool right = snapshot.IsPressed(GamepadButtonInputId.DpadRight) || stickX > 0.5f;
             bool up = snapshot.IsPressed(GamepadButtonInputId.DpadUp) || stickY > 0.5f;
             bool down = snapshot.IsPressed(GamepadButtonInputId.DpadDown) || stickY < -0.5f;
-            bool confirm = snapshot.IsPressed(GamepadButtonInputId.A) ||
-                           snapshot.IsPressed(GamepadButtonInputId.B);
+            // [Nextendo] Swapped A/B: the physical bottom button (logical B, i.e. Xbox "A") confirms /
+            // accepts, and the physical right/side button (logical A) is "back" (close menus,
+            // exit the profile ring). This is the usual PC controller convention; the mapped
+            // snapshot means whatever the user assigned still drives these actions.
+            bool confirm = snapshot.IsPressed(GamepadButtonInputId.B);
+            bool back = snapshot.IsPressed(GamepadButtonInputId.A);
 
-            if (down && !_gamepadDownPressed)
+            // Y or X both open the same per-game options flyout as the right-click.
+            // GetMappedStateSnapshot honours the user's input remapping for logical Y/X.
+            bool menu = snapshot.IsPressed(GamepadButtonInputId.Y) ||
+                        snapshot.IsPressed(GamepadButtonInputId.X);
+
+            bool menuOpen = _contextMenuFlyout is { IsOpen: true };
+            if (menuOpen)
             {
-                if (_navLevel == NavProfile)
-                    ExitProfile();
-                else if (_navLevel == NavCarousel)
-                    EnterBottom();
+                // Joystick / d-pad drive the open context menu: up/down move the highlighted
+                // option, the confirm button (logical B, bottom) executes it, the back button
+                // (logical A, side) closes it. The carousel itself stays put.
+                if (up && !_gamepadUpPressed)
+                    MoveContextMenuSelection(-1);
+                if (down && !_gamepadDownPressed)
+                    MoveContextMenuSelection(1);
+                if (confirm && !_gamepadConfirmDown)
+                    ExecuteContextMenuItem(_contextMenuIndex);
+                if (back && !_gamepadBackDown)
+                    CloseContextMenu();
             }
-            if (up && !_gamepadUpPressed)
+            else
             {
-                if (_navLevel == NavBottom)
-                    ExitBottom();
-                else if (_navLevel == NavCarousel)
-                    EnterProfile();
-            }
-            if (left && !_gamepadLeftPressed)
-            {
-                if (_navLevel == NavBottom)
-                    MoveBottom(-1);
-                else if (_navLevel == NavCarousel)
-                    MoveBy(-1);
-            }
-            if (right && !_gamepadRightPressed)
-            {
-                if (_navLevel == NavBottom)
-                    MoveBottom(1);
-                else if (_navLevel == NavCarousel)
-                    MoveBy(1);
-            }
-            if (confirm && !_gamepadConfirmDown)
-            {
-                if (_navLevel == NavProfile)
-                    ProfileButton_OnClick(this, null);
-                else if (_navLevel == NavBottom)
-                    ActivateBottom();
-                else
-                    Confirm();
+                if (down && !_gamepadDownPressed)
+                {
+                    if (_navLevel == NavProfile)
+                        ExitProfile();
+                    else if (_navLevel == NavCarousel)
+                        EnterBottom();
+                }
+                if (up && !_gamepadUpPressed)
+                {
+                    if (_navLevel == NavBottom)
+                        ExitBottom();
+                    else if (_navLevel == NavCarousel)
+                        EnterProfile();
+                }
+                if (left && !_gamepadLeftPressed)
+                {
+                    if (_navLevel == NavBottom)
+                        MoveBottom(-1);
+                    else if (_navLevel == NavCarousel)
+                        MoveBy(-1);
+                }
+                if (right && !_gamepadRightPressed)
+                {
+                    if (_navLevel == NavBottom)
+                        MoveBottom(1);
+                    else if (_navLevel == NavCarousel)
+                        MoveBy(1);
+                }
+                if (confirm && !_gamepadConfirmDown)
+                {
+                    if (_navLevel == NavProfile)
+                        ProfileButton_OnClick(this, null);
+                    else if (_navLevel == NavBottom)
+                        ActivateBottom();
+                    else
+                        Confirm();
+                }
+                // Back (logical A, the side/physical-right button, Xbox-style cancel): it
+                // closes the profile dialog if one is open, otherwise it un-highlights the
+                // profile ring.
+                if (back && !_gamepadBackDown)
+                {
+                    if (_profileDialog != null)
+                        _profileDialog.Hide();
+                    else if (_navLevel == NavProfile)
+                        ExitProfile();
+                }
+                if (menu && !_gamepadMenuDown && _navLevel == NavCarousel)
+                {
+                    OpenContextMenu();
+                }
             }
 
             _gamepadLeftPressed = left;
@@ -431,6 +799,8 @@ private void CarouselList_RightTapped(object? sender, RoutedEventArgs e)
             _gamepadUpPressed = up;
             _gamepadDownPressed = down;
             _gamepadConfirmDown = confirm;
+            _gamepadMenuDown = menu;
+            _gamepadBackDown = back;
         }
 
         private IGamepad GetConfiguredGamepad()

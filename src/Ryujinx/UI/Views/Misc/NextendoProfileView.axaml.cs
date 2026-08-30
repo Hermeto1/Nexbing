@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -9,6 +10,7 @@ using Ryujinx.Ava.Common.Locale;
 using Ryujinx.Ava.UI.Helpers;
 using Ryujinx.Ava.UI.Models;
 using Ryujinx.Common.Configuration;
+using Ryujinx.Common.Logging;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -31,6 +33,24 @@ namespace Ryujinx.Ava.UI.Views.Misc
         private readonly ObservableCollection<NextendoFriendModel> _playingNow = [];
         private readonly ObservableCollection<NextendoLobbyPlayerModel> _recent = [];
         private readonly ObservableCollection<NextendoHistoryModel> _history = [];
+        private readonly Dictionary<ulong, string> _recentCodes = [];
+
+        // Estado de la modale de reporte (0 / vacío cuando no hay reporte abierto).
+        private ulong _reportTarget;
+        private string _reportReason = "";
+
+        /// <summary>Motivos de reporte y la pista que acompaña al cuadro de texto.</summary>
+        private static readonly (string Id, string Title, string Desc, string Hint)[] _motifs =
+        [
+            ("cheating",         "Trampas",                      "Cheats, emulador de teclado, macros…",              "Describe la trampa y cuándo la viste."),
+            ("name",             "Nombre inapropiado",           "El nombre incluye insultos o contenido sexual.",    "¿Qué nombre concreto muestra?"),
+            ("name_mismatch",    "Nombre incoherente",           "El nombre no coincide con el perfil mostrado.",     "¿Qué nombre muestra y qué deberías ver?"),
+            ("avatar",           "Imagen de perfil inapropiada", "Avatar ofensivo o fuera de la temática.",           "Describe la imagen y por qué es inapropiada."),
+            ("harassment",       "Acoso e insultos",             "Mensajes ofensivos, amenazas o acoso.",             "¿Qué te escribió y dónde?"),
+            ("griefing",         "Sabotaje",                     "Arruina el juego a propósito o molesta a otros.",   "Cuéntanos qué hizo."),
+            ("impersonation",    "Suplantación",                 "Se hace pasar por otra persona o por el staff.",    "¿A quién suplanta?"),
+            ("other",            "Otro",                         "Elige este motivo y detállalo en el cuadro.",       "¿Qué pasó?"),
+        ];
 
         private readonly DispatcherTimer _refreshTimer;
 
@@ -243,10 +263,16 @@ namespace Ryujinx.Ava.UI.Views.Misc
             // Recent encounters: people met online, with avatar fetched separately.
             List<NextendoApi.NextendoPlayer> recent = await NextendoApi.GetRecentPlayersAsync();
 
+            _recentCodes.Clear();
             _recent.Clear();
             foreach (NextendoApi.NextendoPlayer p in recent)
             {
                 byte[] avatar = await NextendoApi.GetAvatarAsync(p.Pid, p.AvatarUrl);
+
+                if (!string.IsNullOrEmpty(p.FriendCode))
+                {
+                    _recentCodes[p.Pid] = p.FriendCode;
+                }
 
                 _recent.Add(new NextendoLobbyPlayerModel
                 {
@@ -254,6 +280,7 @@ namespace Ryujinx.Ava.UI.Views.Misc
                     Name = p.Name,
                     Image = avatar,
                     Known = p.Known,
+                    IsFriend = p.Known && friends.Any(f => f.Pid == p.Pid),
                     GameName = ResolveGame(p.TitleId),
                     SeenAt = p.SeenAt,
                 });
@@ -399,6 +426,180 @@ namespace Ryujinx.Ava.UI.Views.Misc
             {
                 await top.Clipboard.SetTextAsync(NextendoAccount.FriendCode);
             }
+        }
+
+        // ============================================================ [Nextendo]
+        // Recientes → añadir amigo + reportar (réplica de "Nextendo - Recently met")
+        // ============================================================
+
+        private async void AddRecentFriend_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: ulong pid })
+            {
+                return;
+            }
+
+            if (!_recentCodes.TryGetValue(pid, out string code) || string.IsNullOrEmpty(code))
+            {
+                ShowStatus(RecentStatusText, "No hay un código de amigo disponible para este jugador.", false);
+
+                return;
+            }
+
+            (bool ok, string message) = await NextendoApi.AddFriendAsync(code);
+            ShowStatus(RecentStatusText, message, ok);
+
+            if (ok)
+            {
+                _ = LoadFriends();
+            }
+        }
+
+        private void Report_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: ulong pid })
+            {
+                return;
+            }
+
+            NextendoLobbyPlayerModel jugador = _recent.FirstOrDefault(p => p.Pid == pid);
+
+            _reportTarget = pid;
+            _reportReason = "";
+
+            ReportTargetText.Text = jugador?.Name ?? $"#{pid}";
+            ReportTargetSubText.Text = jugador?.SeenLine ?? "";
+            ReportInitialText.Text = jugador?.Initial ?? "?";
+            PoseAvatar(jugador?.Image);
+
+            ReportCommentBox.Text = "";
+            MontreEtape1();
+
+            ShowStatus(RecentStatusText, "", true);
+            ReportOverlay.IsVisible = true;
+        }
+
+        /// <summary>Carga el avatar del reportado en la modale, o cae en la inicial.</summary>
+        private void PoseAvatar(byte[] octets)
+        {
+            if (octets is not { Length: > 0 })
+            {
+                ReportAvatarImage.Source = null;
+                ReportAvatarImage.IsVisible = false;
+                ReportInitialText.IsVisible = true;
+
+                return;
+            }
+
+            try
+            {
+                using MemoryStream flujo = new(octets);
+                ReportAvatarImage.Source = new Bitmap(flujo);
+                ReportAvatarImage.IsVisible = true;
+                ReportInitialText.IsVisible = false;
+            }
+            catch (Exception ex)
+            {
+                // Una foto ilegible no debe impedir reportar — a veces es el motivo.
+                Logger.Warning?.Print(LogClass.Application, $"[Nextendo] avatar decode failed: {ex.Message}");
+                ReportAvatarImage.IsVisible = false;
+                ReportInitialText.IsVisible = true;
+            }
+        }
+
+        private void MontreEtape1()
+        {
+            ReportModalSubtitleText.IsVisible = true;
+            ReportReasonScroll.IsVisible = true;
+            ReportChosenBox.IsVisible = false;
+            ReportCommentArea.IsVisible = false;
+            ReportBackButton.IsVisible = false;
+            ReportSendButton.IsVisible = false;
+            ShowStatus(ModalReportStatus, "", true);
+        }
+
+        private void ReportReason_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: string motivo } || !_motifs.Any(m => m.Id == motivo))
+            {
+                return;
+            }
+
+            var infos = _motifs.First(m => m.Id == motivo);
+            _reportReason = motivo;
+
+            ReportChosenText.Text = infos.Title;
+            ReportChosenDescText.Text = infos.Desc;
+            ReportCommentBox.Watermark = infos.Hint;
+
+            ReportModalSubtitleText.IsVisible = false;
+            ReportReasonScroll.IsVisible = false;
+            ReportChosenBox.IsVisible = true;
+            ReportCommentArea.IsVisible = true;
+            ReportBackButton.IsVisible = true;
+            ReportSendButton.IsVisible = true;
+            ReportCommentBox.Focus();
+        }
+
+        private void ReportBack_Click(object sender, RoutedEventArgs e)
+        {
+            _reportReason = "";
+            MontreEtape1();
+        }
+
+        private void ReportCancel_Click(object sender, RoutedEventArgs e) => CerrarModale();
+
+        /// <summary>
+        /// Clic en el velo: se cierra. El chequeo de la fuente es imprescindible —
+        /// sin él, un clic dentro de la tarjeta subiría hasta aquí y cerraría la
+        /// modale a mitad de la redacción.
+        /// </summary>
+        private void ReportOverlay_PointerPressed(object sender, PointerPressedEventArgs e)
+        {
+            if (ReferenceEquals(e.Source, ReportOverlay))
+            {
+                CerrarModale();
+            }
+        }
+
+        private void CerrarModale()
+        {
+            _reportTarget = 0;
+            _reportReason = "";
+            ReportOverlay.IsVisible = false;
+        }
+
+        private async void ReportSend_Click(object sender, RoutedEventArgs e)
+        {
+            if (_reportTarget == 0 || string.IsNullOrEmpty(_reportReason))
+            {
+                return;
+            }
+
+            ulong cible = _reportTarget;
+
+            ReportSendButton.IsEnabled = false;
+            (bool ok, string error) = await NextendoApi.ReportPlayerAsync(cible, _reportReason, ReportCommentBox.Text ?? "");
+            ReportSendButton.IsEnabled = true;
+
+            if (ok)
+            {
+                CerrarModale();
+                ShowStatus(RecentStatusText, "Reporte enviado. Gracias.", true);
+
+                return;
+            }
+
+            // El servidor distingue sus rechazos: el jugador merece saber cuál.
+            string mensaje = error switch
+            {
+                "not_encountered" => "No se pudo confirmar que hayas coincidido con este jugador.",
+                "quota" => "Ya has enviado demasiados reportes en poco tiempo. Inténtalo más tarde.",
+                _ => $"El reporte no se pudo enviar: {error}",
+            };
+
+            Logger.Info?.Print(LogClass.Application, $"[Nextendo] report refused: {error}");
+            ShowStatus(ModalReportStatus, mensaje, false);
         }
 
         private static void ShowStatus(TextBlock target, string text, bool ok)
